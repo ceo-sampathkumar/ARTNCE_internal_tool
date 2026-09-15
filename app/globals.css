@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-paper: #EDEAE2;
+  --color-paper-dark: #E2DDD0;
+  --color-ink: #221F1C;
+  --color-ink-muted: #5B5445;
+  --color-rule: #CBC3B0;
+  --color-rust: #B8452D;
+  --color-danger: #A3291B;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.pcc * {
+  box-sizing: border-box;
+}
+
+.pcc input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.pcc input[type=number]::-webkit-outer-spin-button,
+.pcc input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.pcc table {
+  border-collapse: collapse;
+  width: 100%;
+}

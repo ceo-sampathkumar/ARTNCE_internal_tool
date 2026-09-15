@@ -1,0 +1,128 @@
+// This is your Prisma schema file for PostgreSQL.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Cost Settings Model
+// -----------------------------------------------------------------------------
+model CostSettings {
+  id               String   @id @default(cuid())
+  name             String   @default("Default Artnce Benchmark")
+  isDefault        Boolean  @default(true)
+  currencySymbol   String   @default("₹")
+  decimals         Int      @default(0)
+
+  // Canvas
+  canvasEnabled    Boolean  @default(true)
+  canvasPrintRate  Float    @default(150.0)
+
+  // Stretching & Support
+  stretchEnabled   Boolean  @default(true)
+  stretchMode      String   @default("combined") // "combined" | "separate"
+  combinedRate     Float    @default(85.714)
+  stretchOnlyRate  Float    @default(85.714)
+  beamRate         Float    @default(85.714)
+  beamFormula      String   @default("shorter")  // "shorter" | "longer" | "width" | "height" | "none"
+  beamThreshold    Float    @default(3.0)
+
+  // Frame
+  frameEnabled     Boolean  @default(true)
+  frameRate        Float    @default(171.429)
+  frameType        String   @default("Black Floater Frame")
+
+  // Transportation
+  transportPercent Float    @default(2.0)
+
+  // Relations
+  extraComponents  ExtraComponent[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("cost_settings")
+}
+
+// -----------------------------------------------------------------------------
+// Extra Component Model (Line items: Varnish, Labour, Packaging, GST, etc.)
+// -----------------------------------------------------------------------------
+model ExtraComponent {
+  id          String        @id @default(cuid())
+  settingId   String?
+  setting     CostSettings? @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  name        String
+  unit        String        @default("unit")
+  quantity    Float         @default(1.0)
+  rate        Float         @default(0.0)
+  enabled     Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([settingId])
+  @@map("extra_components")
+}
+
+// -----------------------------------------------------------------------------
+// Pricing Preset Model
+// -----------------------------------------------------------------------------
+model PricingPreset {
+  id            String   @id @default(cuid())
+  method        String   @default("markup") // "markup" | "margin"
+  markupPercent Float    @default(40.0)
+  marginPercent Float    @default(30.0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("pricing_presets")
+}
+
+// -----------------------------------------------------------------------------
+// Saved Calculations / Production Quotes Model
+// -----------------------------------------------------------------------------
+model CalculationQuote {
+  id                 String   @id @default(cuid())
+  title              String?
+  clientName         String?
+  status             String   @default("draft") // "draft" | "quoted" | "in_production" | "completed"
+  
+  // Input dimensions
+  width              Float
+  height             Float
+  unit               String   @default("ft") // "ft" | "in"
+  widthFt            Float
+  heightFt           Float
+  areaSqFt           Float
+  perimeterFt        Float
+
+  // Cost results
+  subtotalCost       Float
+  transportCost      Float
+  totalCost          Float
+  costPerSqFt        Float
+
+  // Pricing results
+  pricingMethod      String   @default("markup") // "markup" | "margin"
+  pricingMarkupPct   Float?
+  pricingMarginPct   Float?
+  profit             Float
+  sellingPrice       Float
+
+  // Immutable snapshots for historical integrity
+  breakdownSnapshot  Json     // Full array of breakdown rows calculated
+  settingsSnapshot   Json     // Full snapshot of rates & settings active at calculation time
+
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("calculation_quotes")
+}
