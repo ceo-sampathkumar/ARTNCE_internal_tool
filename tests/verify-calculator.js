@@ -4,6 +4,9 @@ import {
   toFeet,
   DEFAULT_SETTINGS,
   DEFAULT_PRICING,
+  calculatePaintingCost,
+  calculateBatchSummary,
+  calculateSubscriptionEconomics,
 } from '../lib/calculator.js';
 
 let passed = 0;
@@ -68,16 +71,121 @@ assertClose(pMarkup.profit, 7711.2 - 5508, 0.01, 'Profit for 40% markup is ₹2,
 
 // 5. Pricing Gross Margin Test (30% margin on ₹5,508)
 const pMargin = calculatePricing(5508, { method: 'margin', marginPercent: 30 });
-const expectedMarginPrice = 5508 / 0.7; // ~7868.57
-assertClose(pMargin.sellingPrice, expectedMarginPrice, 0.01, '30% Gross margin gives cost / (1 - 0.3) = ₹7,868.57');
-assertClose(pMargin.marginPct, 30, 0.01, 'Gross margin percentage is 30%');
+assertClose(pMargin.sellingPrice, 5508 / 0.7, 0.01, '30% Gross margin gives cost / (1 - 0.3) = ₹7,868.57');
+assertClose(pMargin.marginPct, 30, 0.001, 'Gross margin percentage is 30%');
 
-console.log(`\n========================================`);
+// 6. calculatePaintingCost central engine test
+const pCost = calculatePaintingCost({ width: '3', height: '4', unit: 'ft' }, DEFAULT_SETTINGS);
+assert(pCost.isValid, 'Painting cost result is valid');
+assertClose(pCost.areaSqFt, 12, 0.001, 'calculatePaintingCost area is 12 sq ft');
+assertClose(pCost.perimeterRunningFt, 14, 0.001, 'calculatePaintingCost perimeter is 14 ft');
+assertClose(pCost.canvasPrintCost, 1800, 0.001, 'canvasPrintCost is 1800');
+assertClose(pCost.totalProductionCost, 5508, 0.3, 'calculatePaintingCost totalProductionCost is ₹5,508');
+
+// 7. Batch calculation test
+const sampleBatch = [
+  { id: '1', width: '3', height: '4', unit: 'ft' },
+  { id: '2', width: '2', height: '3', unit: 'ft' },
+  { id: '3', width: '2', height: '2.5', unit: 'ft' },
+  { id: '4', width: '18', height: '12', unit: 'in' },
+  { id: '5', width: '16', height: '20', unit: 'in' },
+];
+const batchSummary = calculateBatchSummary(sampleBatch, DEFAULT_SETTINGS);
+assert(batchSummary.count === 5, 'Batch count is 5');
+assert(batchSummary.validCount === 5, 'Batch valid count is 5');
+
+const manualSum = sampleBatch.reduce(
+  (sum, p) => sum + calculatePaintingCost(p, DEFAULT_SETTINGS).totalProductionCost,
+  0
+);
+assertClose(batchSummary.totalProductionCost, manualSum, 0.01, 'Batch total equals sum of individual painting costs');
+assert(batchSummary.avgCostPerArtwork === batchSummary.totalProductionCost / 5, 'Average cost per artwork is accurate');
+
+// 8. Curated subset selection test (8 total, 5 selected)
+const extendedBatch = [
+  ...sampleBatch,
+  { id: '6', width: '4', height: '5', unit: 'ft' },
+  { id: '7', width: '2', height: '2', unit: 'ft' },
+  { id: '8', width: '30', height: '40', unit: 'in' },
+];
+const selectedIds = ['1', '2', '3', '4', '5'];
+const curatedList = extendedBatch.filter((p) => selectedIds.includes(p.id));
+const curatedSummary = calculateBatchSummary(curatedList, DEFAULT_SETTINGS);
+assert(curatedSummary.validCount === 5, 'Curated count is exactly 5');
+assertClose(curatedSummary.totalProductionCost, batchSummary.totalProductionCost, 0.01, 'Curated total matches selected subset');
+
+// 9. Subscription economics test (₹30,000 investment, ₹10,000 sub, ₹4,000 op costs)
+const subEconomics = calculateSubscriptionEconomics({
+  initialInvestment: 30000,
+  monthlySubscription: 10000,
+  operatingCosts: { curator: 2000, logistics: 1000, operations: 1000 },
+});
+assertClose(subEconomics.monthlyOperatingCosts, 4000, 0.01, 'Monthly operating costs is ₹4,000');
+assertClose(subEconomics.monthlyContribution, 6000, 0.01, 'Monthly contribution is ₹6,000');
+assertClose(subEconomics.simpleRecoveryMonths, 3, 0.01, 'Simple recovery is 3.0 months (30000 / 10000)');
+assertClose(subEconomics.estimatedRecoveryMonths, 5, 0.01, 'Estimated recovery with operating costs is 5.0 months (30000 / 6000)');
+assert(subEconomics.isRecoveryAchievable === true, 'Recovery is achievable');
+
+// Check scenarios (3, 6, 12, 24 mo)
+const sc3 = subEconomics.scenarios.find((s) => s.months === 3);
+assertClose(sc3.totalRevenue, 30000, 0.01, '3 mo revenue is ₹30,000');
+assertClose(sc3.operatingCostsTotal, 12000, 0.01, '3 mo operating costs is ₹12,000');
+assertClose(sc3.totalContribution, 18000, 0.01, '3 mo total contribution is ₹18,000');
+assertClose(sc3.contributionAfterInvestment, -12000, 0.01, '3 mo contribution after investment is -₹12,000');
+assert(sc3.isRecovered === false, '3 mo is not fully recovered');
+
+const sc12 = subEconomics.scenarios.find((s) => s.months === 12);
+assertClose(sc12.totalRevenue, 120000, 0.01, '12 mo revenue is ₹1,20,000');
+assertClose(sc12.totalContribution, 72000, 0.01, '12 mo contribution is ₹72,000');
+assertClose(sc12.contributionAfterInvestment, 42000, 0.01, '12 mo contribution after investment is ₹42,000 (not labeled profit)');
+assert(sc12.isRecovered === true, '12 mo is recovered');
+
+// 10. Safeguard: Negative / Zero Contribution Test
+const deficitEconomics = calculateSubscriptionEconomics({
+  initialInvestment: 30000,
+  monthlySubscription: 5000,
+  operatingCosts: { curator: 4000, logistics: 3000 }, // Total = ₹7,000 > ₹5,000
+});
+assert(deficitEconomics.monthlyContribution === -2000, 'Monthly contribution is -₹2,000');
+assert(deficitEconomics.isRecoveryAchievable === false, 'Recovery is not achievable when contribution <= 0');
+assert(deficitEconomics.estimatedRecoveryMonths === null, 'Estimated recovery months is null, never negative or Infinity');
+assert(typeof deficitEconomics.unachievableReason === 'string', 'Unachievable reason is clearly provided');
+
+// 11. Pricing Independence Test
+const testPainting = { width: '3', height: '4', unit: 'ft' };
+const costBefore = calculatePaintingCost(testPainting, DEFAULT_SETTINGS).totalProductionCost;
+
+// Vary subscription price ₹10,000 -> ₹12,000 -> ₹15,000
+const sub10 = calculateSubscriptionEconomics({ initialInvestment: costBefore, monthlySubscription: 10000 });
+const sub12 = calculateSubscriptionEconomics({ initialInvestment: costBefore, monthlySubscription: 12000 });
+const sub15 = calculateSubscriptionEconomics({ initialInvestment: costBefore, monthlySubscription: 15000 });
+
+const costAfter = calculatePaintingCost(testPainting, DEFAULT_SETTINGS).totalProductionCost;
+assertClose(costBefore, costAfter, 0.0001, 'Pricing independence: changing subscription price leaves production cost unchanged');
+assertClose(costAfter, 5508, 0.3, 'Production cost remains benchmark ₹5,508');
+
+// 12. Settings Propagation Test
+const modifiedSettings = { ...DEFAULT_SETTINGS, frameRate: 200 }; // Frame rate changed from 171.429 to 200
+const singleNewCost = calculatePaintingCost(testPainting, modifiedSettings).totalProductionCost;
+assert(singleNewCost > costBefore, 'Single painting cost increases when frame rate increases');
+
+const batchNewSummary = calculateBatchSummary(sampleBatch, modifiedSettings);
+assert(batchNewSummary.totalProductionCost > batchSummary.totalProductionCost, 'Batch total cost updates with new settings');
+
+const curatedNewSummary = calculateBatchSummary(curatedList, modifiedSettings);
+assert(curatedNewSummary.totalProductionCost > curatedSummary.totalProductionCost, 'Curated collection cost updates with new settings');
+
+const subPropagated = calculateSubscriptionEconomics({
+  initialInvestment: curatedNewSummary.totalProductionCost,
+  monthlySubscription: 10000,
+});
+assert(subPropagated.initialInvestment === curatedNewSummary.totalProductionCost, 'Subscription initial investment updates with new settings');
+assert(subPropagated.monthlySubscription === 10000, 'Subscription monthly price does NOT change automatically');
+
+console.log('\n========================================');
 console.log(`Total tests: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);
-console.log(`========================================`);
+console.log('========================================\n');
 
 if (failed > 0) {
   process.exit(1);
-} else {
-  process.exit(0);
 }
