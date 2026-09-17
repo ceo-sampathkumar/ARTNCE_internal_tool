@@ -201,6 +201,19 @@ export default function BatchView({
                             style={{ color: C.ink, fontFamily: FONT_BODY }}
                           />
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onUpdatePainting(p.id, 'source', p.source === 'artist' ? 'artnce' : 'artist')}
+                              title="Click to toggle between ARTNCE in-house work and Artist partner work"
+                              className="text-[10px] px-1.5 py-0.5 rounded font-mono font-medium border shrink-0 transition-colors"
+                              style={{
+                                backgroundColor: p.source === 'artist' ? '#FBF7F0' : '#F5F5F4',
+                                borderColor: p.source === 'artist' ? C.rust : C.rule,
+                                color: p.source === 'artist' ? C.rust : C.ink,
+                              }}
+                            >
+                              {p.source === 'artist' ? '🎨 ARTIST' : '🏢 ARTNCE'}
+                            </button>
                             <input
                               type="text"
                               value={p.artist || ''}

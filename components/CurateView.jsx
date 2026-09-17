@@ -359,7 +359,19 @@ export default function CurateView({
 
                       {/* Artwork Title */}
                       <td className="py-3 px-4 font-medium" style={{ color: C.ink }}>
-                        {p.title || `Artwork ${String(index + 1).padStart(2, '0')}`}
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="text-[10px] px-1 py-0.5 rounded font-mono font-medium border"
+                            style={{
+                              backgroundColor: p.source === 'artist' ? '#FBF7F0' : '#F5F5F4',
+                              borderColor: p.source === 'artist' ? C.rust : C.rule,
+                              color: p.source === 'artist' ? C.rust : C.inkMuted,
+                            }}
+                          >
+                            {p.source === 'artist' ? 'ARTIST' : 'ARTNCE'}
+                          </span>
+                          <span>{p.title || `Artwork ${String(index + 1).padStart(2, '0')}`}</span>
+                        </div>
                       </td>
 
                       {/* Artist / Category */}

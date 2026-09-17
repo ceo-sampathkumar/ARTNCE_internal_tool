@@ -68,6 +68,7 @@ export default function SubscriptionView({
   onSaveSnapshot,
   onNavigateToCurate,
   onNavigateToBatch,
+  onNavigateToPerformance,
   // Backward compatibility props
   subscriptionState,
   onUpdateSubscription,
@@ -136,6 +137,7 @@ export default function SubscriptionView({
     totalMonthlyClientDeliveryCost = 0,
     maintenanceMonthly = 0,
     artistRecurringMonthly = 0,
+    artistRentMonthly = 0,
     manpowerMonthly = 0,
     travelMonthlyAllocation = 0,
     packagingMonthly = 0,
@@ -149,13 +151,17 @@ export default function SubscriptionView({
     isRecoveryAchievable = false,
     unachievableReason = null,
     scenarios = [],
-    curator = { feePerCycle: 2000, cycles: 1, totalCuratorCost: 2000 },
+    curator = { feePerCycle: 2000, cycles: 1, totalCuratorCost: 2000, type: 'remote' },
     installation = { feePerCycle: 1500, cycles: 1, total: 1500 },
     rotation = { feePerCycle: 1000, cycles: 1, total: 1000 },
     logistics = { feePerCycle: 1200, cycles: 1, total: 1200 },
     packaging = { feePerCycle: 400, cycles: 1, total: 400 },
     projectTravel = { feePerCycle: 600, cycles: 1, total: 600 },
     totalProjectVisitCosts = 0,
+    artworkRecovery = {},
+    targetRecoveryValue = 0,
+    recoveryMarkupPercent = 60,
+    recoveryTargetReachedMonth = null,
   } = currentEconomics;
 
   const handleSubscriptionPriceChange = (val) => {
@@ -1032,9 +1038,15 @@ export default function SubscriptionView({
                     <span className="tabular font-medium text-stone-800">- {money(maintenanceMonthly)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-stone-600">Painting / Artist Recurring Stipend:</span>
+                    <span className="text-stone-600">Artist Recurring Stipend / Remuneration:</span>
                     <span className="tabular font-medium text-stone-800">- {money(artistRecurringMonthly)}</span>
                   </div>
+                  {Number(artistRentMonthly) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-stone-600">Artist Rent / Studio Lease:</span>
+                      <span className="tabular font-medium text-stone-800">- {money(artistRentMonthly)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-stone-600">Manpower Allocation:</span>
                     <span className="tabular font-medium text-stone-800">- {money(manpowerMonthly)}</span>
@@ -1462,20 +1474,25 @@ export default function SubscriptionView({
             {/* Right: Recovery Analysis Cards */}
             <div className="lg:col-span-6 space-y-4">
               {/* Card A: Simple Artwork Investment Recovery */}
-              <div className="p-6" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paper }}>
-                <div>
-                  <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.inkMuted }}>
-                    Simple Artwork Investment Recovery
+              <div className="p-5" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paper }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.inkMuted }}>
+                      Simple Artwork Payback
+                    </span>
+                    <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
+                      Initial Outlay ÷ Monthly Subscription Revenue
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-stone-100 text-stone-700">
+                    Gross Top-line
                   </span>
-                  <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
-                    Initial Artwork Investment ÷ Monthly Subscription Revenue
-                  </p>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-3">
                   {simpleRecoveryMonths !== null ? (
                     <div className="flex items-baseline gap-3">
-                      <div className="text-3xl font-semibold tabular font-mono" style={{ color: C.rust }}>
+                      <div className="text-2xl font-semibold tabular font-mono" style={{ color: C.rust }}>
                         {Math.ceil(simpleRecoveryMonths)} {Math.ceil(simpleRecoveryMonths) === 1 ? 'Month' : 'Months'}
                       </div>
                       <div className="text-xs tabular font-mono" style={{ color: C.inkMuted }}>
@@ -1483,9 +1500,9 @@ export default function SubscriptionView({
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm font-medium text-stone-500">
+                    <div className="text-xs font-medium text-stone-500">
                       {initialInvestment === 0
-                        ? 'No artworks selected. Add artworks to calculate investment recovery.'
+                        ? 'Add artworks to calculate investment recovery.'
                         : 'Enter a monthly subscription price.'}
                     </div>
                   )}
@@ -1493,20 +1510,25 @@ export default function SubscriptionView({
               </div>
 
               {/* Card B: Estimated Recovery After Operating Costs */}
-              <div className="p-6" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paperDark }}>
-                <div>
-                  <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.ink }}>
-                    Estimated Investment Recovery (With Monthly Operating Costs)
+              <div className="p-5" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paperDark }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.ink }}>
+                      Operating Payback (Net Contribution)
+                    </span>
+                    <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
+                      Initial Outlay ÷ Monthly Contribution (after delivery &amp; overhead)
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-stone-200 text-stone-800">
+                    Net Operating
                   </span>
-                  <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
-                    Initial Artwork Investment ÷ Monthly Contribution (accounts for recurring delivery &amp; overhead)
-                  </p>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-3">
                   {isRecoveryAchievable && estimatedRecoveryMonths !== null ? (
                     <div className="flex items-baseline gap-3">
-                      <div className="text-3xl font-semibold tabular font-mono" style={{ color: C.ink }}>
+                      <div className="text-2xl font-semibold tabular font-mono" style={{ color: C.ink }}>
                         {Math.ceil(estimatedRecoveryMonths)} {Math.ceil(estimatedRecoveryMonths) === 1 ? 'Month' : 'Months'}
                       </div>
                       <div className="text-xs tabular font-mono" style={{ color: C.inkMuted }}>
@@ -1514,21 +1536,83 @@ export default function SubscriptionView({
                       </div>
                     </div>
                   ) : (
-                    <div className="p-3 bg-red-50 border border-red-200 text-red-900 rounded text-xs">
+                    <div className="p-2.5 bg-red-50 border border-red-200 text-red-900 rounded text-xs">
                       <div className="flex items-center gap-1.5 font-medium">
-                        <AlertTriangle size={14} className="text-red-700 shrink-0" />
+                        <AlertTriangle size={13} className="text-red-700 shrink-0" />
                         <span>
                           {unachievableReason ||
-                            'Investment recovery is not achievable at the current subscription fee and operating cost structure.'}
+                            'Operating recovery is not achievable at current fee and cost structure.'}
                         </span>
                       </div>
-                      {monthlyContribution <= 0 && monthlySubscription > 0 && (
-                        <p className="mt-1 text-[11px] text-red-700">
-                          Monthly operating costs exceed subscription revenue.
-                        </p>
-                      )}
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* Card C: 60% Markup Target Recovery Card */}
+              <div
+                className="p-5 rounded border"
+                style={{
+                  backgroundColor: '#FAF8F5',
+                  borderColor: C.rust,
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider font-bold" style={{ color: C.rust }}>
+                      Asset Recovery Target ({recoveryMarkupPercent || 60}% Target Markup)
+                    </span>
+                    <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
+                      Initial Investment + {recoveryMarkupPercent || 60}% asset recovery markup value
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold bg-[#B8452D]/10 text-[#B8452D]">
+                    Asset Recovery Model
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 pt-3 border-t text-xs font-mono" style={{ borderColor: 'rgba(184,69,45,0.2)' }}>
+                  <div>
+                    <span className="block text-[10px] text-stone-500 font-sans">Initial Outlay</span>
+                    <span className="font-bold text-stone-900">{money(initialInvestment)}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-stone-500 font-sans">+{recoveryMarkupPercent || 60}% Markup</span>
+                    <span className="font-bold text-amber-900">
+                      +{money(artworkRecovery?.markupAmount ?? (initialInvestment * 0.6))}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-stone-500 font-sans">Target Recovery</span>
+                    <span className="font-bold text-lg text-[#B8452D]">
+                      {money(targetRecoveryValue || (initialInvestment * 1.6))}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-stone-500 font-sans">Target Reached</span>
+                    <span className="font-bold text-emerald-800">
+                      {recoveryTargetReachedMonth ? `Month ${recoveryTargetReachedMonth}` : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2 border-t flex items-center justify-between text-[11px]" style={{ borderColor: 'rgba(184,69,45,0.15)' }}>
+                  <span className="text-stone-600">
+                    Recovery markup is isolated from operational gross margin and direct delivery.
+                  </span>
+                  <div className="flex items-center gap-1 font-mono text-xs">
+                    <span className="text-stone-500">Target %:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="500"
+                      value={currentPlan.recoveryMarkupPercent ?? 60}
+                      onChange={(e) => onUpdatePlan(currentPlanId, 'recoveryMarkupPercent', e.target.value)}
+                      className="w-12 text-right bg-white border px-1 py-0.5 rounded font-bold outline-none"
+                      style={{ borderColor: C.rule }}
+                    />
+                    <span>%</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1627,6 +1711,27 @@ export default function SubscriptionView({
                         step="any"
                         value={currentPlan.artistRecurringMonthly ?? 0}
                         onChange={(e) => onUpdatePlan(currentPlanId, 'artistRecurringMonthly', e.target.value)}
+                        className="w-full bg-transparent py-0.5 outline-none tabular font-mono"
+                        style={{ color: C.ink }}
+                      />
+                    </div>
+                  </label>
+
+                  {/* Artist Rent Input */}
+                  <label className="block">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="block text-[11px]" style={{ color: C.inkMuted }}>
+                        Artist Rent (Separate from Stipend)
+                      </span>
+                      <span className="text-[10px] text-stone-400 font-mono">Studio / Storage Lease</span>
+                    </div>
+                    <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
+                      <span className="text-xs font-mono mr-1 text-stone-400">{symbol}</span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={currentPlan.artistRentMonthly ?? 0}
+                        onChange={(e) => onUpdatePlan(currentPlanId, 'artistRentMonthly', e.target.value)}
                         className="w-full bg-transparent py-0.5 outline-none tabular font-mono"
                         style={{ color: C.ink }}
                       />
@@ -1744,6 +1849,31 @@ export default function SubscriptionView({
                         {money(curator.totalCuratorCost)}
                       </span>
                     </div>
+                    {/* Remote vs Physical selector */}
+                    <div className="flex items-center gap-1 my-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePlanNested(currentPlanId, 'curator', 'type', 'remote')}
+                        className={`px-2 py-0.5 text-[11px] font-mono rounded ${
+                          (currentPlan.curator?.type || 'remote') === 'remote'
+                            ? 'bg-stone-900 text-white font-bold'
+                            : 'bg-stone-200/70 text-stone-700'
+                        }`}
+                      >
+                        Remote Curation
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePlanNested(currentPlanId, 'curator', 'type', 'physical')}
+                        className={`px-2 py-0.5 text-[11px] font-mono rounded ${
+                          currentPlan.curator?.type === 'physical'
+                            ? 'bg-[#B8452D] text-white font-bold'
+                            : 'bg-stone-200/70 text-stone-700'
+                        }`}
+                      >
+                        Physical Visit
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-2 mt-1">
                       <label className="block">
                         <span className="text-[10px] text-stone-500">Fee / Visit:</span>
@@ -1768,6 +1898,9 @@ export default function SubscriptionView({
                           style={{ borderColor: C.rule }}
                         />
                       </label>
+                    </div>
+                    <div className="mt-2 text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200">
+                      <strong>Notice:</strong> Curation price is for ONE curation work/visit cycle — NOT a monthly charge.
                     </div>
                   </div>
 
@@ -2057,6 +2190,36 @@ export default function SubscriptionView({
                 <Bookmark size={13} /> Save Plan Snapshot
               </button>
             </div>
+          </div>
+          {/* Next Workflow Stage Navigation Banner */}
+          <div
+            className="p-6 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-4"
+            style={{
+              backgroundColor: C.paperDark,
+              borderColor: C.ink,
+            }}
+          >
+            <div>
+              <div className="text-xs uppercase font-mono font-bold tracking-wider" style={{ color: C.rust }}>
+                NEXT WORKFLOW STAGE
+              </div>
+              <div className="text-base font-bold mt-1" style={{ color: C.ink }}>
+                Step 05: Company Performance &amp; Sustainability Planning
+              </div>
+              <div className="text-xs text-stone-500 mt-0.5">
+                Model executive revenue targets (₹3,00,000/mo), active client portfolio mix, and review interactive SVG charts.
+              </div>
+            </div>
+            {onNavigateToPerformance && (
+              <button
+                type="button"
+                onClick={onNavigateToPerformance}
+                className="px-5 py-2.5 text-xs font-mono font-bold uppercase rounded flex items-center gap-2 transition-all hover:opacity-90 shrink-0"
+                style={{ backgroundColor: C.ink, color: C.paper }}
+              >
+                Open Company Performance →
+              </button>
+            )}
           </div>
         </>
       )}

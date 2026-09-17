@@ -36,6 +36,7 @@ import {
   calculateCuratorFee,
   calculatePlanEconomics,
   calculatePortfolioSustainability,
+  calculateCompanyPerformance,
 } from '@/lib/calculator';
 import {
   DEFAULT_SETTINGS,
@@ -45,6 +46,12 @@ import {
   DEFAULT_COMPANY_COSTS,
   DEFAULT_PLANS,
   DEFAULT_PORTFOLIO_MIX,
+  DEFAULT_WORK_TYPE,
+  WORK_TYPES,
+  DEFAULT_ARTIST_CONTEXT,
+  ARTIST_RENT_FREQUENCIES,
+  DEFAULT_CURATOR_PRICING,
+  DEFAULT_EXPECTED_MONTHLY_REVENUE,
   createDefaultCustomPlan,
   STORAGE_KEY,
   STORAGE_KEY_BATCH,
@@ -54,6 +61,10 @@ import {
   STORAGE_KEY_COMPANY_COSTS,
   STORAGE_KEY_PLANS,
   STORAGE_KEY_PORTFOLIO,
+  STORAGE_KEY_WORK_TYPE,
+  STORAGE_KEY_ARTIST,
+  STORAGE_KEY_CURATOR_PRICING,
+  STORAGE_KEY_COMPANY_PERFORMANCE,
   createEmptyPainting,
   createDefaultBatch,
   makeId,
@@ -61,6 +72,7 @@ import {
 import BatchView from './BatchView';
 import CurateView from './CurateView';
 import SubscriptionView from './SubscriptionView';
+import CompanyPerformanceView from './CompanyPerformanceView';
 
 /* -----------------------------------------------------------------------
  * Reusable UI Building Blocks
@@ -68,7 +80,7 @@ import SubscriptionView from './SubscriptionView';
 function Segmented({ options, value, onChange }) {
   return (
     <div className="inline-flex" style={{ border: `1px solid ${C.rule}` }}>
-      {options.map((opt, i) => (
+      {(options || []).map((opt, i) => (
         <button
           key={String(opt.value)}
           type="button"
@@ -218,6 +230,13 @@ export default function PaintingCostCalculator() {
   const [activePlanId, setActivePlanId] = useState('professional');
   const [portfolioClients, setPortfolioClients] = useState(DEFAULT_PORTFOLIO_MIX);
 
+  // Commercial Work Type & Artist Partnership Context
+  const [workType, setWorkType] = useState(DEFAULT_WORK_TYPE); // 'artnce' | 'artist'
+  const [artistContext, setArtistContext] = useState(DEFAULT_ARTIST_CONTEXT);
+  const [curatorPricing, setCuratorPricing] = useState(DEFAULT_CURATOR_PRICING);
+  const [expectedMonthlyRevenue, setExpectedMonthlyRevenue] = useState(DEFAULT_EXPECTED_MONTHLY_REVENUE);
+  const [showArtistDetails, setShowArtistDetails] = useState(false);
+
   // General & persistence state
   const [loaded, setLoaded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -344,6 +363,40 @@ export default function PaintingCostCalculator() {
           if (savedQuotesLocal) {
             setQuotesList(JSON.parse(savedQuotesLocal));
           }
+
+          // Load Work Type & Artist context
+          const localWorkType = window.localStorage.getItem(STORAGE_KEY_WORK_TYPE);
+          if (localWorkType) setWorkType(localWorkType);
+
+          const localArtist = window.localStorage.getItem(STORAGE_KEY_ARTIST);
+          if (localArtist) {
+            try {
+              setArtistContext((prev) => ({ ...prev, ...JSON.parse(localArtist) }));
+            } catch (e) {
+              console.warn('Failed to parse artist context:', e);
+            }
+          }
+
+          const localCuratorPricing = window.localStorage.getItem(STORAGE_KEY_CURATOR_PRICING);
+          if (localCuratorPricing) {
+            try {
+              setCuratorPricing((prev) => ({ ...prev, ...JSON.parse(localCuratorPricing) }));
+            } catch (e) {
+              console.warn('Failed to parse curator pricing:', e);
+            }
+          }
+
+          const localPerformance = window.localStorage.getItem(STORAGE_KEY_COMPANY_PERFORMANCE);
+          if (localPerformance) {
+            try {
+              const parsedPerf = JSON.parse(localPerformance);
+              if (parsedPerf?.expectedMonthlyRevenue) {
+                setExpectedMonthlyRevenue(Number(parsedPerf.expectedMonthlyRevenue));
+              }
+            } catch (e) {
+              console.warn('Failed to parse company performance:', e);
+            }
+          }
         }
       } catch (err) {
         console.warn('LocalStorage read error:', err);
@@ -398,10 +451,31 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY_COMPANY_COSTS, JSON.stringify(companyCosts));
       window.localStorage.setItem(STORAGE_KEY_PLANS, JSON.stringify(plans));
       window.localStorage.setItem(STORAGE_KEY_PORTFOLIO, JSON.stringify(portfolioClients));
+      window.localStorage.setItem(STORAGE_KEY_WORK_TYPE, workType);
+      window.localStorage.setItem(STORAGE_KEY_ARTIST, JSON.stringify(artistContext));
+      window.localStorage.setItem(STORAGE_KEY_CURATOR_PRICING, JSON.stringify(curatorPricing));
+      window.localStorage.setItem(
+        STORAGE_KEY_COMPANY_PERFORMANCE,
+        JSON.stringify({ expectedMonthlyRevenue })
+      );
     } catch (e) {
       console.warn('LocalStorage write error:', e);
     }
-  }, [settings, pricing, paintings, curationContext, subscriptionState, companyCosts, plans, portfolioClients, loaded]);
+  }, [
+    settings,
+    pricing,
+    paintings,
+    curationContext,
+    subscriptionState,
+    companyCosts,
+    plans,
+    portfolioClients,
+    workType,
+    artistContext,
+    curatorPricing,
+    expectedMonthlyRevenue,
+    loaded,
+  ]);
 
   // Robust tab navigation: ALWAYS closes Settings drawer when switching sections
   const handleNavigateTab = (tab) => {
@@ -512,11 +586,19 @@ export default function PaintingCostCalculator() {
     const econ = {};
     for (const [planId, planData] of Object.entries(plans || {})) {
       if (planData) {
-        econ[planId] = calculatePlanEconomics(planData, companyCosts, curatedSummary, settings, available);
+        econ[planId] = calculatePlanEconomics(
+          planData,
+          companyCosts,
+          curatedSummary,
+          settings,
+          available,
+          curatorPricing,
+          artistContext
+        );
       }
     }
     return econ;
-  }, [plans, companyCosts, curatedSummary, settings, batchSummary.calculatedPaintings]);
+  }, [plans, companyCosts, curatedSummary, settings, batchSummary.calculatedPaintings, curatorPricing, artistContext]);
 
   // Company Sustainability & Portfolio Mix across active clients
   const portfolioSustainability = useMemo(() => {
@@ -911,11 +993,153 @@ export default function PaintingCostCalculator() {
           </div>
         </header>
 
-        {/* Primary Pipeline Navigation: 01 COST → 02 BATCH → 03 CURATE → 04 SUBSCRIPTION */}
+        {/* Work Type Selection Banner */}
+        <div
+          className="mb-6 p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          style={{
+            backgroundColor: workType === 'artist' ? '#FBF7F0' : C.paperDark,
+            borderColor: workType === 'artist' ? C.rust : C.rule,
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className="px-2.5 py-1 text-xs font-mono font-bold tracking-wider rounded uppercase"
+              style={{
+                backgroundColor: workType === 'artist' ? C.rust : C.ink,
+                color: '#fff',
+              }}
+            >
+              WORK TYPE
+            </span>
+            <div>
+              <div className="text-sm font-bold" style={{ color: C.ink }}>
+                {workType === 'artist' ? 'ARTIST WORK (Partnership & Curation)' : 'ARTNCE WORK (Direct Production & Inventory)'}
+              </div>
+              <div className="text-xs text-gray-600">
+                {workType === 'artist'
+                  ? 'Artwork produced or curated through an external artist partner with separate stipend and rent.'
+                  : 'Artwork produced, framed, and managed directly by ARTNCE in-house.'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded border p-1 bg-white" style={{ borderColor: C.rule }}>
+              <button
+                type="button"
+                onClick={() => setWorkType('artnce')}
+                className={`px-3 py-1 text-xs font-mono font-medium rounded transition-colors ${
+                  workType === 'artnce' ? 'bg-stone-900 text-white font-bold' : 'text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                ARTNCE WORK
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkType('artist')}
+                className={`px-3 py-1 text-xs font-mono font-medium rounded transition-colors ${
+                  workType === 'artist' ? 'bg-[#B8452D] text-white font-bold' : 'text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                ARTIST WORK
+              </button>
+            </div>
+
+            {workType === 'artist' && (
+              <button
+                type="button"
+                onClick={() => setShowArtistDetails((v) => !v)}
+                className="px-2.5 py-1 text-xs font-mono border rounded hover:bg-white transition-colors"
+                style={{ borderColor: C.rust, color: C.rust }}
+              >
+                {showArtistDetails ? 'Hide Artist Setup' : 'Configure Artist'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Expandable Artist Context Drawer */}
+        {workType === 'artist' && showArtistDetails && (
+          <div
+            className="mb-6 p-5 rounded-xl border bg-white space-y-4 shadow-sm"
+            style={{ borderColor: C.rust }}
+          >
+            <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: C.rule }}>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-900">
+                  Artist Commercial Setup (Strict Separation of Payment vs Rent)
+                </span>
+              </div>
+              <span className="text-[11px] text-gray-500 font-mono">Applies to Artist Work throughout workflow</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
+              <label className="block">
+                <span className="block text-gray-600 mb-1">Artist Name:</span>
+                <input
+                  type="text"
+                  value={artistContext.artistName}
+                  onChange={(e) => setArtistContext((prev) => ({ ...prev, artistName: e.target.value }))}
+                  placeholder="e.g. Maya Rao"
+                  className="w-full border-b py-1 text-sm outline-none font-sans font-medium"
+                  style={{ borderColor: C.rule, color: C.ink }}
+                />
+              </label>
+
+              <label className="block">
+                <span className="block text-gray-600 mb-1">Artist Direct Payment (Stipend):</span>
+                <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
+                  <span className="text-gray-400 mr-1">{symbol}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={artistContext.artistPayment || ''}
+                    onChange={(e) => setArtistContext((prev) => ({ ...prev, artistPayment: Number(e.target.value) || 0 }))}
+                    placeholder="0"
+                    className="w-full bg-transparent py-1 text-sm outline-none font-bold"
+                    style={{ color: C.ink }}
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="block text-gray-600 mb-1">Artist Rent (Separate from Payment):</span>
+                <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
+                  <span className="text-gray-400 mr-1">{symbol}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={artistContext.artistRent || ''}
+                    onChange={(e) => setArtistContext((prev) => ({ ...prev, artistRent: Number(e.target.value) || 0 }))}
+                    placeholder="0"
+                    className="w-full bg-transparent py-1 text-sm outline-none font-bold"
+                    style={{ color: C.rust }}
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="block text-gray-600 mb-1">Rent Frequency:</span>
+                <select
+                  value={artistContext.artistRentFrequency}
+                  onChange={(e) => setArtistContext((prev) => ({ ...prev, artistRentFrequency: e.target.value }))}
+                  className="w-full bg-transparent border-b py-1 text-xs outline-none font-medium"
+                  style={{ borderColor: C.rule, color: C.ink }}
+                >
+                  {ARTIST_RENT_FREQUENCIES.map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Primary Pipeline Navigation: 01 COST → 02 BATCH → 03 CURATE → 04 SUBSCRIPTION → 05 PERFORMANCE */}
         <nav className="mb-10 overflow-x-auto">
           <div
             className="inline-flex items-center gap-1 sm:gap-2 p-1.5 rounded"
-            style={{ backgroundColor: C.paperDark, border: `1px solid ${C.rule}`, minWidth: '600px' }}
+            style={{ backgroundColor: C.paperDark, border: `1px solid ${C.rule}`, minWidth: '780px' }}
           >
             {/* Step 01: COST */}
             <button
@@ -1002,6 +1226,24 @@ export default function PaintingCostCalculator() {
               <div>
                 <span className="font-mono text-[10px] block opacity-70">04 SUBSCRIPTION</span>
                 <span className="font-medium text-sm">Lease Economics</span>
+              </div>
+            </button>
+
+            <span className="text-stone-400 font-mono text-xs px-1">→</span>
+
+            {/* Step 05: PERFORMANCE */}
+            <button
+              type="button"
+              onClick={() => handleNavigateTab('performance')}
+              className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
+              style={{
+                backgroundColor: activeTab === 'performance' ? C.ink : 'transparent',
+                color: activeTab === 'performance' ? C.paper : C.ink,
+              }}
+            >
+              <div>
+                <span className="font-mono text-[10px] block opacity-70">05 PERFORMANCE</span>
+                <span className="font-medium text-sm">Company &amp; Sustainability</span>
               </div>
             </button>
           </div>
@@ -1124,7 +1366,7 @@ export default function PaintingCostCalculator() {
                 </button>
               </div>
               <div className="space-y-2">
-                {settings.extraComponents.map((c) => (
+                {(settings.extraComponents || []).map((c) => (
                   <div key={c.id} className="grid gap-2" style={{ gridTemplateColumns: '1fr 70px 70px 80px 24px' }}>
                     <input
                       value={c.name}
@@ -1162,6 +1404,169 @@ export default function PaintingCostCalculator() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Curator Central Pricing Matrix */}
+            <div className="mt-6 pt-5 border-t" style={{ borderColor: C.rule }}>
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: C.ink }}>
+                    Curator Central Pricing Configuration
+                  </h3>
+                  <p className="text-xs text-amber-900 bg-amber-50 px-2 py-1 rounded border border-amber-200 mt-1 font-mono">
+                    <strong>Notice:</strong> {curatorPricing.notice || 'Curation price is for ONE curation work/visit cycle — NOT a monthly charge.'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-500 font-mono">Lookup Mode:</span>
+                  <div className="inline-flex rounded border p-0.5 bg-white" style={{ borderColor: C.rule }}>
+                    <button
+                      type="button"
+                      onClick={() => setCuratorPricing((prev) => ({ ...prev, method: 'plan' }))}
+                      className={`px-2.5 py-0.5 text-xs font-mono rounded ${
+                        curatorPricing.method !== 'space' ? 'bg-stone-900 text-white font-bold' : 'text-gray-700'
+                      }`}
+                    >
+                      Plan-Based
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCuratorPricing((prev) => ({ ...prev, method: 'space' }))}
+                      className={`px-2.5 py-0.5 text-xs font-mono rounded ${
+                        curatorPricing.method === 'space' ? 'bg-stone-900 text-white font-bold' : 'text-gray-700'
+                      }`}
+                    >
+                      Space-Based
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Plan-Based Table */}
+              {curatorPricing.method !== 'space' ? (
+                <div className="overflow-x-auto border rounded bg-white mt-3" style={{ borderColor: C.rule }}>
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="bg-gray-50 border-b text-gray-500" style={{ borderColor: C.rule }}>
+                        <th className="py-2 px-3">Plan Tier</th>
+                        <th className="py-2 px-3">Reference Space</th>
+                        <th className="py-2 px-3 text-right">Remote Curation Fee ({symbol})</th>
+                        <th className="py-2 px-3 text-right">Physical Visit Fee ({symbol})</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: C.rule }}>
+                      {[
+                        { key: 'essential', label: 'Essential', space: 'Up to 2,000 sq ft' },
+                        { key: 'professional', label: 'Professional', space: '~15,000 sq ft' },
+                        { key: 'enterprise', label: 'Enterprise', space: '~20,000–25,000 sq ft' },
+                        { key: 'signature', label: 'Signature', space: 'Custom Bespoke Space' },
+                      ].map((p) => {
+                        const tier = curatorPricing.planBased?.[p.key] || {};
+                        return (
+                          <tr key={p.key}>
+                            <td className="py-2 px-3 font-bold text-gray-900">{p.label}</td>
+                            <td className="py-2 px-3 text-gray-600 font-sans">{p.space}</td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                value={tier.remotePrice ?? ''}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  setCuratorPricing((prev) => ({
+                                    ...prev,
+                                    planBased: {
+                                      ...prev.planBased,
+                                      [p.key]: { ...prev.planBased?.[p.key], remotePrice: val },
+                                    },
+                                  }));
+                                }}
+                                className="w-24 text-right border-b py-0.5 outline-none font-bold"
+                                style={{ borderColor: C.rule }}
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                value={tier.physicalPrice ?? ''}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  setCuratorPricing((prev) => ({
+                                    ...prev,
+                                    planBased: {
+                                      ...prev.planBased,
+                                      [p.key]: { ...prev.planBased?.[p.key], physicalPrice: val },
+                                    },
+                                  }));
+                                }}
+                                className="w-24 text-right border-b py-0.5 outline-none font-bold text-amber-900"
+                                style={{ borderColor: C.rule }}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                /* Space-Based Table */
+                <div className="overflow-x-auto border rounded bg-white mt-3" style={{ borderColor: C.rule }}>
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="bg-gray-50 border-b text-gray-500" style={{ borderColor: C.rule }}>
+                        <th className="py-2 px-3">Space Tier Range</th>
+                        <th className="py-2 px-3 text-right">Remote Curation Fee ({symbol})</th>
+                        <th className="py-2 px-3 text-right">Physical Visit Fee ({symbol})</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: C.rule }}>
+                      {(curatorPricing.spaceBased || []).map((t, idx) => (
+                        <tr key={t.id || idx}>
+                          <td className="py-2 px-3 font-bold text-gray-900">{t.label}</td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              value={t.remotePrice ?? ''}
+                              onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                setCuratorPricing((prev) => ({
+                                  ...prev,
+                                  spaceBased: prev.spaceBased.map((item, i) =>
+                                    i === idx ? { ...item, remotePrice: val } : item
+                                  ),
+                                }));
+                              }}
+                              className="w-24 text-right border-b py-0.5 outline-none font-bold"
+                              style={{ borderColor: C.rule }}
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              value={t.physicalPrice ?? ''}
+                              onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                setCuratorPricing((prev) => ({
+                                  ...prev,
+                                  spaceBased: prev.spaceBased.map((item, i) =>
+                                    i === idx ? { ...item, physicalPrice: val } : item
+                                  ),
+                                }));
+                              }}
+                              className="w-24 text-right border-b py-0.5 outline-none font-bold text-amber-900"
+                              style={{ borderColor: C.rule }}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="pt-6 mt-4 border-t flex items-center justify-between flex-wrap gap-4" style={{ borderColor: C.rule }}>
@@ -1337,7 +1742,7 @@ export default function PaintingCostCalculator() {
                         </tr>
                       </thead>
                       <tbody>
-                        {singleResult.rows.map((r) => (
+                        {(singleResult.rows || singleResult.breakdownRows || []).map((r) => (
                           <tr key={r.id} style={{ borderBottom: `1px solid ${C.rule}` }}>
                             <td className="py-2.5 text-sm">{r.name}</td>
                             <td className="py-2.5 text-xs tabular" style={{ color: C.inkMuted, fontFamily: FONT_MONO }}>{r.formula}</td>
@@ -1532,6 +1937,25 @@ export default function PaintingCostCalculator() {
             onSaveSnapshot={saveSnapshot}
             onNavigateToCurate={() => handleNavigateTab('curate')}
             onNavigateToBatch={() => handleNavigateTab('batch')}
+            onNavigateToPerformance={() => handleNavigateTab('performance')}
+          />
+        )}
+
+        {/* -------------------------------------------------------------------
+         * STAGE 05: PERFORMANCE (Company Sustainability & Executive Modeling)
+         * -----------------------------------------------------------------*/}
+        {activeTab === 'performance' && (
+          <CompanyPerformanceView
+            plans={plans}
+            plansEconomics={plansEconomics}
+            portfolioClients={portfolioClients}
+            onUpdatePortfolioClientCount={handleUpdatePortfolioClientCount}
+            companyCosts={companyCosts}
+            expectedMonthlyRevenue={expectedMonthlyRevenue}
+            onUpdateExpectedMonthlyRevenue={setExpectedMonthlyRevenue}
+            settings={settings}
+            onAddCustomPlan={handleAddCustomPlan}
+            onNavigateToSubscription={() => handleNavigateTab('subscription')}
           />
         )}
       </div>

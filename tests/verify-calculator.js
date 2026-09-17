@@ -11,9 +11,15 @@ import {
   calculateCuratorFee,
   calculatePlanEconomics,
   calculatePortfolioSustainability,
+  getCuratorPrice,
+  calculateArtworkRecovery,
+  calculateCompanyPerformance,
+  calculateEventCounts,
   DEFAULT_COMPANY_COSTS,
   DEFAULT_PLANS,
   DEFAULT_PORTFOLIO_MIX,
+  DEFAULT_CURATOR_PRICING,
+  DEFAULT_EXPECTED_MONTHLY_REVENUE,
   createDefaultBatch,
   createDefaultCustomPlan,
 } from '../lib/calculator.js';
@@ -53,15 +59,15 @@ const canvasRow = b3x4.rows.find((r) => r.id === 'canvas');
 assertClose(canvasRow.cost, 1800, 0.001, 'Canvas cost is ₹1,800');
 
 const stretchRow = b3x4.rows.find((r) => r.id === 'stretch');
-assertClose(stretchRow.cost, 1200, 0.1, 'Stretching + Support cost is ~₹1,200 (14 * 85.714)');
+assertClose(stretchRow.cost, 1260, 0.1, 'Stretching + Support cost is ₹1,260 (14 * 90)');
 
 const frameRow = b3x4.rows.find((r) => r.id === 'frame');
-assertClose(frameRow.cost, 2400, 0.1, 'Frame cost is ~₹2,400 (14 * 171.429)');
+assertClose(frameRow.cost, 2800, 0.1, 'Frame cost is ₹2,800 (14 * 200)');
 
-assertClose(b3x4.subtotal, 5400, 0.2, 'Subtotal is ~₹5,400');
-assertClose(b3x4.transportCost, 108, 0.1, 'Transportation (2% of subtotal) is ~₹108');
-assertClose(b3x4.total, 5508, 0.3, 'Total production cost is ~₹5,508');
-assertClose(b3x4.total / b3x4.area, 459, 0.1, 'Cost per sq ft is ~₹459');
+assertClose(b3x4.subtotal, 5860, 0.2, 'Subtotal is ₹5,860');
+assertClose(b3x4.transportCost, 117.2, 0.1, 'Transportation (2% of subtotal) is ₹117.20');
+assertClose(b3x4.total, 5977.2, 0.3, 'Total production cost is ₹5,977.20');
+assertClose(b3x4.total / b3x4.area, 498.1, 0.1, 'Cost per sq ft is ₹498.10');
 
 // 2. Unit conversion test (36 in x 48 in == 3 ft x 4 ft)
 const wFtFromInches = toFeet(36, 'in');
@@ -89,7 +95,7 @@ assert(pCost.isValid, 'Painting cost result is valid');
 assertClose(pCost.areaSqFt, 12, 0.001, 'calculatePaintingCost area is 12 sq ft');
 assertClose(pCost.perimeterRunningFt, 14, 0.001, 'calculatePaintingCost perimeter is 14 ft');
 assertClose(pCost.canvasPrintCost, 1800, 0.001, 'canvasPrintCost is 1800');
-assertClose(pCost.totalProductionCost, 5508, 0.3, 'calculatePaintingCost totalProductionCost is ₹5,508');
+assertClose(pCost.totalProductionCost, 5977.2, 0.3, 'calculatePaintingCost totalProductionCost is ₹5,977.20');
 
 // 7. Batch calculation test
 const sampleBatch = [
@@ -171,10 +177,10 @@ const sub15 = calculateSubscriptionEconomics({ initialInvestment: costBefore, mo
 
 const costAfter = calculatePaintingCost(testPainting, DEFAULT_SETTINGS).totalProductionCost;
 assertClose(costBefore, costAfter, 0.0001, 'Pricing independence: changing subscription price leaves production cost unchanged');
-assertClose(costAfter, 5508, 0.3, 'Production cost remains benchmark ₹5,508');
+assertClose(costAfter, 5977.2, 0.3, 'Production cost remains benchmark ₹5,977.20');
 
 // 12. Settings Propagation Test
-const modifiedSettings = { ...DEFAULT_SETTINGS, frameRate: 200 }; // Frame rate changed from 171.429 to 200
+const modifiedSettings = { ...DEFAULT_SETTINGS, frameRate: 250 }; // Frame rate changed from 200 to 250
 const singleNewCost = calculatePaintingCost(testPainting, modifiedSettings).totalProductionCost;
 assert(singleNewCost > costBefore, 'Single painting cost increases when frame rate increases');
 
@@ -631,6 +637,120 @@ assert(sustainB.totalActiveClients === 33, 'Portfolio B has 5+15+10+3 = 33 activ
 const expectedRevB = 5 * 6500 + 15 * 10000 + 10 * 25000 + 3 * 18000; // 32500 + 150000 + 250000 + 54000 = 486500
 assert(sustainB.totalMonthlySubscriptionRevenue === expectedRevB, `Portfolio B total revenue is ₹${expectedRevB}`);
 assert(sustainB.totalMonthlySubscriptionRevenue !== sustainA.totalMonthlySubscriptionRevenue, 'Portfolio B calculates independently from Portfolio A');
+
+// =========================================================================
+// TEST 37: Independent Subscription Term & Rotation Cycles Event Counts
+// =========================================================================
+console.log('\n--- Test 37: Event Counting (12-mo sub / 3-mo rotation) ---');
+const events12_3 = calculateEventCounts({ subscriptionMonths: 12, rotationMonths: 3 });
+assert(events12_3.rotationEvents === 3, '12-mo term with 3-mo rotation has 3 rotation events');
+assert(events12_3.initialCurationEvents === 1, 'Initial curation is 1 event');
+assert(events12_3.totalCurationEvents === 4, 'Total curation cycles is 1 initial + 3 rotations = 4 events');
+assert(events12_3.initialInstallationEvents === 1, 'Initial installation is 1 event');
+assert(events12_3.totalLogisticsEvents === 4, 'Total logistics is 1 initial + 3 rotations = 4 events');
+assert(events12_3.totalPackagingEvents === 4, 'Total packaging is 1 initial + 3 rotations = 4 events');
+
+// Test 6-mo subscription with 6-mo rotation (no rotation during term)
+const events6_6 = calculateEventCounts({ subscriptionMonths: 6, rotationMonths: 6 });
+assert(events6_6.rotationEvents === 0, '6-mo term with 6-mo rotation has 0 mid-term rotations');
+assert(events6_6.totalCurationEvents === 1, '6-mo term with 6-mo rotation has 1 initial curation event');
+
+// =========================================================================
+// TEST 38: Curator Pricing Table Lookups (Remote vs Physical)
+// =========================================================================
+console.log('\n--- Test 38: Curator Pricing Lookups ---');
+const curatorDefault = DEFAULT_CURATOR_PRICING;
+// Essential: Remote ₹1,000, Physical ₹2,000
+assert(getCuratorPrice(curatorDefault, { planId: 'essential', mode: 'remote' }) === 1000, 'Essential remote curation is ₹1,000');
+assert(getCuratorPrice(curatorDefault, { planId: 'essential', mode: 'physical' }) === 2000, 'Essential physical curation is ₹2,000');
+
+// Professional: Remote ₹2,000, Physical ₹3,500
+assert(getCuratorPrice(curatorDefault, { planId: 'professional', mode: 'remote' }) === 2000, 'Professional remote curation is ₹2,000');
+assert(getCuratorPrice(curatorDefault, { planId: 'professional', mode: 'physical' }) === 3500, 'Professional physical curation is ₹3,500');
+
+// Enterprise: Remote ₹3,500, Physical ₹6,000
+assert(getCuratorPrice(curatorDefault, { planId: 'enterprise', mode: 'remote' }) === 3500, 'Enterprise remote curation is ₹3,500');
+assert(getCuratorPrice(curatorDefault, { planId: 'enterprise', mode: 'physical' }) === 6000, 'Enterprise physical curation is ₹6,000');
+
+// Space-based lookup for custom space (e.g. 1,500 sq ft -> Up to 2,000 tier)
+assert(getCuratorPrice(curatorDefault, { spaceSqFt: 1500, mode: 'remote' }) === 1000, 'Space 1,500 sq ft remote curation is ₹1,000');
+assert(getCuratorPrice(curatorDefault, { spaceSqFt: 12000, mode: 'remote' }) === 2000, 'Space 12,000 sq ft remote curation is ₹2,000');
+assert(getCuratorPrice(curatorDefault, { spaceSqFt: 22000, mode: 'physical' }) === 6000, 'Space 22,000 sq ft physical curation is ₹6,000');
+
+// =========================================================================
+// TEST 39: Artwork Investment Recovery with 60% Markup
+// =========================================================================
+console.log('\n--- Test 39: Artwork Recovery with 60% Markup Benchmark ---');
+// Benchmark: Initial investment ₹17,967 with 60% markup
+const recovery60 = calculateArtworkRecovery({
+  initialInvestment: 17967,
+  markupPercent: 60,
+  monthlyContribution: 5200,
+  monthlySubscription: 6500,
+});
+assertClose(recovery60.initialInvestment, 17967, 0.01, 'Benchmark initial investment is ₹17,967');
+assertClose(recovery60.markupPercent, 60, 0.01, 'Benchmark markup is 60%');
+assertClose(recovery60.markupAmount, 10780.20, 0.01, 'Markup amount is ₹10,780.20 (17967 * 0.60)');
+assertClose(recovery60.targetRecoveryValue, 28747.20, 0.01, 'Target recovery value is ₹28,747.20 (17967 * 1.60)');
+assert(recovery60.isAchievable === true, 'Recovery is achievable with positive monthly contribution');
+assert(recovery60.targetReachedMonth === 6, 'Target ₹28,747.20 reached at month 6 (ceil(28747.20 / 5200))');
+assert(recovery60.markupTargetAchievedIn12Mo === true, 'Target achieved within 12-month subscription');
+
+// =========================================================================
+// TEST 40: Additive Economics Build-Up Structure
+// =========================================================================
+console.log('\n--- Test 40: Additive Economics Build-Up ---');
+const testAddPlan = {
+  ...DEFAULT_PLANS.professional,
+  customInitialInvestment: 17967,
+  markupPercent: 60,
+  monthlySubscription: 10000,
+  subscriptionMonths: 12,
+  rotationMonths: 3,
+};
+const testAddEcon = calculatePlanEconomics(testAddPlan, DEFAULT_COMPANY_COSTS);
+// Additive DDC: client delivery cost + project event costs
+assert(testAddEcon.ddc !== undefined, 'Direct Delivery Cost (DDC) object exists');
+assert(testAddEcon.coa !== undefined, 'Company Overhead Allocation (COA) object exists');
+assertClose(
+  testAddEcon.monthlyContributionBeforeOverhead,
+  testAddEcon.monthlySubscription - testAddEcon.totalMonthlyClientDeliveryCost,
+  0.01,
+  'Client contribution is Revenue minus DDC'
+);
+assertClose(
+  testAddEcon.monthlyContribution,
+  testAddEcon.monthlyContributionBeforeOverhead - testAddEcon.totalCompanyOverheadAllocation,
+  0.01,
+  'Remaining contribution is Client contribution minus COA'
+);
+assertClose(
+  testAddEcon.totalMonthlyOperatingCosts,
+  testAddEcon.totalMonthlyClientDeliveryCost + testAddEcon.totalCompanyOverheadAllocation,
+  0.01,
+  'Total cost is DDC plus COA'
+);
+
+// =========================================================================
+// TEST 41: Company Performance Target Analysis & Chart Series
+// =========================================================================
+console.log('\n--- Test 41: Company Performance Target Analysis & Charts ---');
+const perfResult = calculateCompanyPerformance({
+  expectedMonthlyRevenue: 300000,
+  portfolioMix: { essential: 10, professional: 15, enterprise: 4, signature: 1 },
+  plans: DEFAULT_PLANS,
+  companyCosts: DEFAULT_COMPANY_COSTS,
+});
+assert(perfResult.targetRevenue === 300000, 'Target revenue is ₹3,00,000');
+assert(typeof perfResult.totalMonthlySubscriptionRevenue === 'number', 'Total monthly subscription revenue calculated');
+assert(typeof perfResult.revenueGap === 'number', 'Revenue gap calculated');
+assert(typeof perfResult.isTargetReached === 'boolean', 'Target reached flag calculated');
+assert(typeof perfResult.isSustainable === 'boolean', 'Company sustainability flag calculated');
+assert(perfResult.recoveryChartData.length === 24, 'Graph 1 series has 24 monthly points');
+assert(perfResult.monthlyEconomicsData.length === 4, 'Graph 2 series has 4 key categories');
+assert(perfResult.clientVolumeCurveData.length >= 10, 'Graph 3 volume curve data populated');
+assert(perfResult.breakdown.length === 4, '4 plans evaluated in breakdown');
+assert(perfResult.breakevenChartData.length > 0, 'Graph 4 breakeven plans data populated');
 
 console.log('\n========================================');
 console.log(`Total tests: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);
