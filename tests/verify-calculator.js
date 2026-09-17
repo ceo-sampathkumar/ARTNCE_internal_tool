@@ -310,6 +310,150 @@ assertClose(sec19_24.operatingCostsTotal, 96000, 0.01, 'Section 19: 24 mo operat
 assertClose(sec19_24.totalContribution, 144000, 0.01, 'Section 19: 24 mo contribution is ₹1,44,000');
 assertClose(sec19_24.contributionAfterInvestment, 114000, 0.01, 'Section 19: 24 mo contribution after investment is ₹1,14,000');
 
+console.log('\n--- Testing Full Customization of Artwork Scope and Space Size per Plan ---');
+
+// Setup a pool of 10 test paintings with varying sizes and costs
+const testPool = [
+  { id: 'p1', width: '3', height: '4', unit: 'ft', title: 'Executive Canvas #1' }, // 12 sq ft, ₹5,508
+  { id: 'p2', width: '2', height: '3', unit: 'ft', title: 'Corridor Piece #2' },   // 6 sq ft
+  { id: 'p3', width: '4', height: '5', unit: 'ft', title: 'Lobby Centerpiece #3' },// 20 sq ft
+  { id: 'p4', width: '2.5', height: '3.5', unit: 'ft', title: 'Meeting Room #4' }, // 8.75 sq ft
+  { id: 'p5', width: '3', height: '3', unit: 'ft', title: 'Reception Focus #5' },   // 9 sq ft
+  { id: 'p6', width: '2', height: '2', unit: 'ft', title: 'Accent #6' },           // 4 sq ft
+  { id: 'p7', width: '3.5', height: '4.5', unit: 'ft', title: 'Boardroom West #7' },// 15.75 sq ft
+  { id: 'p8', width: '4', height: '6', unit: 'ft', title: 'Atrium Large #8' },    // 24 sq ft
+  { id: 'p9', width: '1.5', height: '2', unit: 'ft', title: 'Nook #9' },           // 3 sq ft
+  { id: 'p10', width: '5', height: '5', unit: 'ft', title: 'Grand Suite #10' },   // 25 sq ft
+];
+const poolSummary = calculateBatchSummary(testPool, DEFAULT_SETTINGS);
+
+// Test 22: Essential artwork scope can be changed (e.g. 2 artworks or 6 artworks)
+const essentialClientA = {
+  ...DEFAULT_PLANS.essential,
+  spaceSqFt: 1200,
+  selectedPaintingIds: ['p1', 'p2'],
+};
+const essentialEconA = calculatePlanEconomics(essentialClientA, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(essentialEconA.planId === 'essential', 'Essential Client A remains Essential plan');
+assert(essentialEconA.artworkCount === 2, 'Essential artwork count can be changed to 2');
+assert(essentialEconA.spaceSqFt === 1200, 'Essential space can be customized to 1,200 sq ft');
+assert(essentialEconA.initialInvestment > 0, 'Essential initial investment calculated from actual 2 artworks');
+
+const essentialClientB = {
+  ...DEFAULT_PLANS.essential,
+  spaceSqFt: 2200,
+  selectedPaintingIds: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'],
+};
+const essentialEconB = calculatePlanEconomics(essentialClientB, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(essentialEconB.planId === 'essential', 'Essential Client B remains Essential plan despite 6 artworks');
+assert(essentialEconB.artworkCount === 6, 'Essential artwork count can be changed to 6');
+assert(essentialEconB.spaceSqFt === 2200, 'Essential space can be customized to 2,200 sq ft');
+assert(essentialEconB.initialInvestment > essentialEconA.initialInvestment, 'Essential investment scales with more artworks');
+
+// Test 23: Professional artwork scope can be changed (Client A: 4 artworks / 1,800 sq ft vs Client B: 8 artworks / 3,500 sq ft)
+const profClientA = {
+  ...DEFAULT_PLANS.professional,
+  spaceSqFt: 1800,
+  selectedPaintingIds: ['p1', 'p2', 'p3', 'p4'],
+};
+const profEconA = calculatePlanEconomics(profClientA, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(profEconA.planId === 'professional', 'Professional Client A is still Professional');
+assert(profEconA.artworkCount === 4, 'Professional Client A has 4 artworks');
+assert(profEconA.spaceSqFt === 1800, 'Professional Client A space is 1,800 sq ft');
+
+const profClientB = {
+  ...DEFAULT_PLANS.professional,
+  spaceSqFt: 3500,
+  selectedPaintingIds: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'],
+};
+const profEconB = calculatePlanEconomics(profClientB, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(profEconB.planId === 'professional', 'Professional Client B is still Professional');
+assert(profEconB.artworkCount === 8, 'Professional Client B has 8 artworks');
+assert(profEconB.spaceSqFt === 3500, 'Professional Client B space is 3,500 sq ft');
+assert(profEconB.initialInvestment > profEconA.initialInvestment, 'Professional investment updates automatically with collection size');
+assert(profEconA.monthlySubscription === 10000 && profEconB.monthlySubscription === 10000, 'Professional subscription price is commercial framework and independent');
+
+// Test 24: Enterprise artwork scope can be changed (e.g. 4 artworks or 10 artworks)
+const enterpriseClientA = {
+  ...DEFAULT_PLANS.enterprise,
+  spaceSqFt: 4500,
+  selectedPaintingIds: ['p1', 'p3', 'p5', 'p7'],
+};
+const enterpriseEconA = calculatePlanEconomics(enterpriseClientA, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(enterpriseEconA.planId === 'enterprise', 'Enterprise Client A is still Enterprise');
+assert(enterpriseEconA.artworkCount === 4, 'Enterprise artwork count can be changed to 4');
+assert(enterpriseEconA.spaceSqFt === 4500, 'Enterprise space can be changed to 4,500 sq ft');
+
+// Test 25: Signature artwork scope can be changed
+const sigClient = {
+  ...DEFAULT_PLANS.signature,
+  spaceSqFt: 7500,
+  selectedPaintingIds: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'],
+};
+const sigEcon = calculatePlanEconomics(sigClient, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(sigEcon.planId === 'signature', 'Signature plan identity preserved');
+assert(sigEcon.artworkCount === 10, 'Signature artwork count matches 10 selected paintings');
+assert(sigEcon.spaceSqFt === 7500, 'Signature space is 7,500 sq ft');
+
+// Test 26: Actual curated artwork selection drives investment
+const sumP1P2P3 = calculateBatchSummary([testPool[0], testPool[1], testPool[2]], DEFAULT_SETTINGS);
+const planCuratedSelected = {
+  ...DEFAULT_PLANS.professional,
+  selectedPaintingIds: ['p1', 'p2', 'p3'],
+};
+const planCuratedEcon = calculatePlanEconomics(planCuratedSelected, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assertClose(planCuratedEcon.initialInvestment, sumP1P2P3.totalProductionCost, 0.01, 'Actual curated artwork selection drives initial investment');
+assertClose(planCuratedEcon.totalArea, sumP1P2P3.totalArea, 0.01, 'Actual curated artwork selection drives total area');
+assert(planCuratedEcon.artworkCount === 3, 'Actual curated artwork count is 3');
+
+// Test 27: Removing artwork updates investment immediately
+const planAfterRemove = {
+  ...planCuratedSelected,
+  selectedPaintingIds: ['p1', 'p3'],
+};
+const econAfterRemove = calculatePlanEconomics(planAfterRemove, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(econAfterRemove.artworkCount === 2, 'Removing artwork decreases count to 2');
+assert(econAfterRemove.initialInvestment < planCuratedEcon.initialInvestment, 'Removing artwork decreases initial investment');
+const sumP1P3 = calculateBatchSummary([testPool[0], testPool[2]], DEFAULT_SETTINGS);
+assertClose(econAfterRemove.initialInvestment, sumP1P3.totalProductionCost, 0.01, 'Initial investment equals exactly remaining paintings');
+
+// Test 28: Adding artwork updates investment immediately
+const planAfterAdd = {
+  ...planAfterRemove,
+  selectedPaintingIds: ['p1', 'p3', 'p4'],
+};
+const econAfterAdd = calculatePlanEconomics(planAfterAdd, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(econAfterAdd.artworkCount === 3, 'Adding artwork increases count to 3');
+assert(econAfterAdd.initialInvestment > econAfterRemove.initialInvestment, 'Adding artwork increases initial investment');
+const sumP1P3P4 = calculateBatchSummary([testPool[0], testPool[2], testPool[3]], DEFAULT_SETTINGS);
+assertClose(econAfterAdd.initialInvestment, sumP1P3P4.totalProductionCost, 0.01, 'Initial investment equals exactly updated set');
+
+// Test 29: Changing space size updates project scope and curator workload
+const spaceSmall = { ...DEFAULT_PLANS.professional, spaceSqFt: 1500, selectedPaintingIds: ['p1', 'p2'] };
+const spaceLarge = { ...DEFAULT_PLANS.professional, spaceSqFt: 4500, selectedPaintingIds: ['p1', 'p2'] };
+const econSpaceSmall = calculatePlanEconomics(spaceSmall, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+const econSpaceLarge = calculatePlanEconomics(spaceLarge, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(econSpaceSmall.spaceSqFt === 1500, 'Small space evaluates to 1,500 sq ft');
+assert(econSpaceLarge.spaceSqFt === 4500, 'Large space evaluates to 4,500 sq ft');
+assert(econSpaceSmall.curator.spaceSqFt === 1500, 'Curator workload basis reflects 1,500 sq ft');
+assert(econSpaceLarge.curator.spaceSqFt === 4500, 'Curator workload basis reflects 4,500 sq ft');
+assert(econSpaceSmall.planId === econSpaceLarge.planId, 'Changing space size does NOT change plan identity');
+
+// Test 30: Plan defaults are not treated as fixed limits
+assert(typeof DEFAULT_PLANS.essential.exampleScenarioLabel === 'string', 'Essential has exampleScenarioLabel');
+assert(typeof DEFAULT_PLANS.professional.exampleScenarioLabel === 'string', 'Professional has exampleScenarioLabel');
+assert(typeof DEFAULT_PLANS.enterprise.exampleScenarioLabel === 'string', 'Enterprise has exampleScenarioLabel');
+assert(DEFAULT_PLANS.essential.exampleScenarioLabel.includes('Example Planning Scenario'), 'Default is clearly labeled as Example Planning Scenario');
+
+// Test 31: Subscription price remains independent from artwork production cost
+const planFixedCostA = { ...DEFAULT_PLANS.professional, selectedPaintingIds: ['p1'], monthlySubscription: 8000 };
+const planFixedCostB = { ...DEFAULT_PLANS.professional, selectedPaintingIds: ['p1'], monthlySubscription: 14000 };
+const econFixedCostA = calculatePlanEconomics(planFixedCostA, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+const econFixedCostB = calculatePlanEconomics(planFixedCostB, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assertClose(econFixedCostA.initialInvestment, econFixedCostB.initialInvestment, 0.0001, 'Artwork production cost is identical regardless of subscription price');
+assert(econFixedCostB.monthlyContribution > econFixedCostA.monthlyContribution, 'Higher subscription price yields higher contribution');
+assert(econFixedCostB.simpleRecoveryMonths < econFixedCostA.simpleRecoveryMonths, 'Higher subscription price yields faster simple recovery');
+
 console.log('\n========================================');
 console.log(`Total tests: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);
 console.log('========================================\n');

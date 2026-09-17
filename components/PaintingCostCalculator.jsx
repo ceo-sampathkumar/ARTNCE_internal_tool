@@ -296,10 +296,22 @@ export default function PaintingCostCalculator() {
             try {
               const parsedPlans = JSON.parse(localPlans);
               if (parsedPlans && typeof parsedPlans === 'object') {
-                setPlans((prev) => ({
-                  ...prev,
-                  ...parsedPlans,
-                }));
+                setPlans((prev) => {
+                  const updated = { ...prev };
+                  for (const key of ['essential', 'professional', 'enterprise', 'signature']) {
+                    if (parsedPlans[key]) {
+                      updated[key] = {
+                        ...prev[key],
+                        ...parsedPlans[key],
+                        curator: { ...prev[key]?.curator, ...(parsedPlans[key]?.curator || {}) },
+                        installation: { ...prev[key]?.installation, ...(parsedPlans[key]?.installation || {}) },
+                        logistics: { ...prev[key]?.logistics, ...(parsedPlans[key]?.logistics || {}) },
+                        projectTravel: { ...prev[key]?.projectTravel, ...(parsedPlans[key]?.projectTravel || {}) },
+                      };
+                    }
+                  }
+                  return updated;
+                });
               }
             } catch (e) {
               console.warn('Failed to parse plans:', e);
@@ -474,13 +486,14 @@ export default function PaintingCostCalculator() {
 
   // 5. Multi-Plan Economics Engine (Essential, Professional, Enterprise, Signature)
   const plansEconomics = useMemo(() => {
+    const available = batchSummary.calculatedPaintings || [];
     return {
-      essential: calculatePlanEconomics(plans.essential, companyCosts, curatedSummary, settings),
-      professional: calculatePlanEconomics(plans.professional, companyCosts, curatedSummary, settings),
-      enterprise: calculatePlanEconomics(plans.enterprise, companyCosts, curatedSummary, settings),
-      signature: calculatePlanEconomics(plans.signature, companyCosts, curatedSummary, settings),
+      essential: calculatePlanEconomics(plans.essential, companyCosts, curatedSummary, settings, available),
+      professional: calculatePlanEconomics(plans.professional, companyCosts, curatedSummary, settings, available),
+      enterprise: calculatePlanEconomics(plans.enterprise, companyCosts, curatedSummary, settings, available),
+      signature: calculatePlanEconomics(plans.signature, companyCosts, curatedSummary, settings, available),
     };
-  }, [plans, companyCosts, curatedSummary, settings]);
+  }, [plans, companyCosts, curatedSummary, settings, batchSummary.calculatedPaintings]);
 
   const symbol = settings.currencySymbol || '₹';
   const decimals = num(settings.decimals, 0);
@@ -510,6 +523,74 @@ export default function PaintingCostCalculator() {
         },
       },
     }));
+  };
+
+  const handleTogglePlanPainting = (planId, paintingId) => {
+    setPlans((prev) => {
+      const plan = prev[planId];
+      if (!plan) return prev;
+      let currentIds = Array.isArray(plan.selectedPaintingIds)
+        ? [...plan.selectedPaintingIds]
+        : (curationContext.selectedPaintingIds && curationContext.selectedPaintingIds.length > 0
+            ? [...curationContext.selectedPaintingIds]
+            : batchSummary.calculatedPaintings.filter((p) => p.cost?.isValid).map((p) => p.id));
+
+      if (currentIds.includes(paintingId)) {
+        currentIds = currentIds.filter((id) => id !== paintingId);
+      } else {
+        currentIds.push(paintingId);
+      }
+      return {
+        ...prev,
+        [planId]: {
+          ...plan,
+          selectedPaintingIds: currentIds,
+        },
+      };
+    });
+  };
+
+  const handleSelectAllPlanPaintings = (planId) => {
+    setPlans((prev) => {
+      const plan = prev[planId];
+      if (!plan) return prev;
+      const allValidIds = batchSummary.calculatedPaintings.filter((p) => p.cost?.isValid).map((p) => p.id);
+      return {
+        ...prev,
+        [planId]: {
+          ...plan,
+          selectedPaintingIds: allValidIds,
+        },
+      };
+    });
+  };
+
+  const handleClearPlanPaintings = (planId) => {
+    setPlans((prev) => {
+      const plan = prev[planId];
+      if (!plan) return prev;
+      return {
+        ...prev,
+        [planId]: {
+          ...plan,
+          selectedPaintingIds: [],
+        },
+      };
+    });
+  };
+
+  const handleResetPlanToCurated = (planId) => {
+    setPlans((prev) => {
+      const plan = prev[planId];
+      if (!plan) return prev;
+      return {
+        ...prev,
+        [planId]: {
+          ...plan,
+          selectedPaintingIds: null,
+        },
+      };
+    });
   };
 
   const handleUpdateCompanyCosts = (field, value) => {
@@ -1353,6 +1434,7 @@ export default function PaintingCostCalculator() {
           <SubscriptionView
             curatedSummary={curatedSummary}
             curationContext={curationContext}
+            availablePaintings={batchSummary.calculatedPaintings}
             companyCosts={companyCosts}
             onUpdateCompanyCosts={handleUpdateCompanyCosts}
             onUpdateEmployee={handleUpdateEmployee}
@@ -1364,6 +1446,10 @@ export default function PaintingCostCalculator() {
             onChangeActivePlanId={setActivePlanId}
             onUpdatePlan={handleUpdatePlan}
             onUpdatePlanNested={handleUpdatePlanNested}
+            onTogglePlanPainting={handleTogglePlanPainting}
+            onSelectAllPlanPaintings={handleSelectAllPlanPaintings}
+            onClearPlanPaintings={handleClearPlanPaintings}
+            onResetPlanToCurated={handleResetPlanToCurated}
             plansEconomics={plansEconomics}
             subscriptionState={subscriptionState}
             onUpdateSubscription={handleUpdateSubscription}
@@ -1372,6 +1458,7 @@ export default function PaintingCostCalculator() {
             settings={settings}
             onSaveSnapshot={saveSnapshot}
             onNavigateToCurate={() => handleNavigateTab('curate')}
+            onNavigateToBatch={() => handleNavigateTab('batch')}
           />
         )}
       </div>

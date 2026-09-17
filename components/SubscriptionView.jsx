@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ChevronDown,
   AlertTriangle,
@@ -36,6 +36,7 @@ import { SUBSCRIPTION_PRESETS } from '@/lib/defaults';
 export default function SubscriptionView({
   curatedSummary = { totalProductionCost: 0, validCount: 0, totalArea: 0, avgCostPerArtwork: 0 },
   curationContext = {},
+  availablePaintings = [],
   companyCosts = { employees: [], bikeReimbursement: {}, otherRecurringExpenses: [] },
   onUpdateCompanyCosts,
   onUpdateEmployee,
@@ -47,10 +48,15 @@ export default function SubscriptionView({
   onChangeActivePlanId,
   onUpdatePlan,
   onUpdatePlanNested,
+  onTogglePlanPainting,
+  onSelectAllPlanPaintings,
+  onClearPlanPaintings,
+  onResetPlanToCurated,
   plansEconomics = {},
   settings = {},
   onSaveSnapshot,
   onNavigateToCurate,
+  onNavigateToBatch,
   // Backward compatibility props
   subscriptionState,
   onUpdateSubscription,
@@ -85,6 +91,26 @@ export default function SubscriptionView({
       projectTravel: { total: 0 },
       totalProjectVisitCosts: 0,
     };
+
+  // Available valid paintings from inventory pool
+  const validPaintings = useMemo(() => {
+    return (availablePaintings || []).filter(
+      (p) => p.cost?.isValid || (p.width && p.height)
+    );
+  }, [availablePaintings]);
+
+  // Set of painting IDs currently assigned to this plan
+  const planSelectedIdSet = useMemo(() => {
+    if (Array.isArray(currentPlan.selectedPaintingIds)) {
+      return new Set(currentPlan.selectedPaintingIds);
+    }
+    if (curationContext.selectedPaintingIds && curationContext.selectedPaintingIds.length > 0) {
+      return new Set(curationContext.selectedPaintingIds);
+    }
+    return new Set(validPaintings.map((p) => p.id));
+  }, [currentPlan.selectedPaintingIds, curationContext.selectedPaintingIds, validPaintings]);
+
+  const isCustomizedCollection = Array.isArray(currentPlan.selectedPaintingIds);
 
   const {
     initialInvestment,
@@ -461,7 +487,7 @@ export default function SubscriptionView({
                           {pData.name}
                         </div>
                         <div className="text-[11px]" style={{ color: C.inkMuted }}>
-                          {pData.spaceSqFt} sq ft • {pData.artworkCount} artworks
+                          {pEcon.spaceSqFt ?? pData.spaceSqFt} sq ft • {pEcon.artworkCount ?? pData.artworkCount} artworks
                         </div>
                       </td>
                       <td className="py-3.5 px-4 text-right tabular font-mono font-semibold text-sm" style={{ color: C.ink }}>
@@ -517,56 +543,83 @@ export default function SubscriptionView({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.rust }}>
-                    Plan Economics & Justification
+                    Subscription Framework
                   </span>
                   <span className="text-xs px-2 py-0.5 rounded font-mono font-medium" style={{ backgroundColor: C.paper, color: C.ink }}>
                     {currentPlan.name} Plan
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded font-mono text-stone-600 bg-stone-200/80">
+                    Commercial Framework (Scope Fully Customizable)
                   </span>
                 </div>
                 <h2 className="mt-1 font-semibold text-lg" style={{ fontFamily: FONT_DISPLAY, color: C.ink }}>
                   {currentPlan.name}: {currentPlan.tagline}
                 </h2>
+                <p className="text-xs mt-0.5" style={{ color: C.inkMuted }}>
+                  A subscription plan is a commercial pricing framework. The actual client project determines the artworks, dimensions, and space required.
+                </p>
               </div>
 
-              {/* Source Link Toggle (Curated vs Custom) */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs" style={{ color: C.inkMuted }}>Artwork Source:</span>
-                <button
-                  type="button"
-                  onClick={() => onUpdatePlan(currentPlanId, 'artworkSource', 'curated')}
-                  className="text-xs px-2.5 py-1 font-medium transition-colors"
-                  style={{
-                    backgroundColor: currentPlan.artworkSource === 'curated' ? C.ink : C.paper,
-                    color: currentPlan.artworkSource === 'curated' ? C.paper : C.ink,
-                    border: `1px solid ${C.rule}`,
-                  }}
-                >
-                  Curated Collection ({curatedSummary.validCount} Artworks)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onUpdatePlan(currentPlanId, 'artworkSource', 'plan_spec')}
-                  className="text-xs px-2.5 py-1 font-medium transition-colors"
-                  style={{
-                    backgroundColor: currentPlan.artworkSource !== 'curated' ? C.ink : C.paper,
-                    color: currentPlan.artworkSource !== 'curated' ? C.paper : C.ink,
-                    border: `1px solid ${C.rule}`,
-                  }}
-                >
-                  Custom Plan Benchmark
-                </button>
+              {/* Space Size & Artwork Source Scope Inputs */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Editable Space Size */}
+                <div className="flex items-center gap-1.5 px-3 py-1.5 border rounded" style={{ backgroundColor: C.paper, borderColor: C.rule }}>
+                  <span className="text-xs font-semibold" style={{ color: C.inkMuted }}>Space Size:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={currentPlan.spaceSqFt ?? ''}
+                    onChange={(e) => onUpdatePlan && onUpdatePlan(currentPlanId, 'spaceSqFt', e.target.value)}
+                    placeholder="2500"
+                    className="w-20 bg-transparent text-right font-mono font-semibold text-sm outline-none"
+                    style={{ color: C.ink }}
+                  />
+                  <span className="text-xs text-stone-400 font-mono">sq ft</span>
+                </div>
+
+                {/* Artwork Source Toggle */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onUpdatePlan && onUpdatePlan(currentPlanId, 'artworkSource', 'curated')}
+                    className="text-xs px-3 py-1.5 font-medium transition-colors rounded-l"
+                    style={{
+                      backgroundColor: currentPlan.artworkSource !== 'custom' ? C.ink : C.paper,
+                      color: currentPlan.artworkSource !== 'custom' ? C.paper : C.ink,
+                      border: `1px solid ${C.rule}`,
+                    }}
+                  >
+                    Select from Artworks ({currentEconomics.artworkCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdatePlan && onUpdatePlan(currentPlanId, 'artworkSource', 'custom')}
+                    className="text-xs px-3 py-1.5 font-medium transition-colors rounded-r"
+                    style={{
+                      backgroundColor: currentPlan.artworkSource === 'custom' ? C.ink : C.paper,
+                      color: currentPlan.artworkSource === 'custom' ? C.paper : C.ink,
+                      border: `1px solid ${C.rule}`,
+                    }}
+                  >
+                    Custom Benchmark
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Top 4 KPI Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
               <div>
-                <div className="text-xs" style={{ color: C.inkMuted }}>Artwork Scope</div>
+                <div className="text-xs" style={{ color: C.inkMuted }}>Project Scope</div>
                 <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.ink }}>
                   {currentEconomics.artworkCount}{' '}
                   <span className="text-sm font-normal text-stone-500">
-                    artworks ({currentPlan.spaceSqFt} sq ft)
+                    artworks ({currentEconomics.spaceSqFt ?? currentPlan.spaceSqFt} sq ft)
                   </span>
+                </div>
+                <div className="text-[11px] text-stone-500 mt-0.5">
+                  {fmtNum(currentEconomics.totalArea, 1)} sq ft total artwork area
                 </div>
               </div>
               <div>
@@ -574,11 +627,17 @@ export default function SubscriptionView({
                 <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.rust }}>
                   {money(initialInvestment)}
                 </div>
+                <div className="text-[11px] text-stone-500 mt-0.5">
+                  Avg {money(currentEconomics.avgCostPerArtwork)} / artwork
+                </div>
               </div>
               <div>
                 <div className="text-xs" style={{ color: C.inkMuted }}>Monthly Operating Cost</div>
                 <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.inkMuted }}>
                   {money(totalMonthlyOperatingCosts)} <span className="text-xs font-normal">/ mo</span>
+                </div>
+                <div className="text-[11px] text-stone-500 mt-0.5">
+                  Staff {money(allocatedEmployeeSalary)} ({currentPlan.employeeAllocationPercent || 0}%)
                 </div>
               </div>
               <div>
@@ -589,15 +648,312 @@ export default function SubscriptionView({
                 >
                   {money(monthlyContribution)} <span className="text-xs font-normal">/ mo</span>
                 </div>
+                <div className="text-[11px] text-stone-500 mt-0.5">
+                  Revenue − Operating Costs
+                </div>
               </div>
             </div>
 
-            {initialInvestment === 0 && (
-              <div className="mt-4 p-3 border border-amber-300 bg-amber-50 text-amber-900 text-xs flex items-center justify-between">
-                <span>No curated artworks selected for this plan. Initial investment is currently ₹0.</span>
-                <button type="button" onClick={onNavigateToCurate} className="font-medium underline ml-2">
-                  Select Artworks in Curate Section
+            {/* Default Scenario Note */}
+            {currentPlan.exampleScenarioLabel && (
+              <div className="mt-4 pt-3 border-t text-[11px] text-stone-500 flex items-center justify-between flex-wrap gap-2" style={{ borderColor: C.rule }}>
+                <span className="italic">
+                  Default Assumption: {currentPlan.exampleScenarioLabel} (Editable planning scenario, not a fixed plan limit).
+                </span>
+                <span className="font-mono text-[10px] text-stone-400">
+                  Plan Identity: {currentPlan.name} (Preserved regardless of artwork count or space)
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Active Plan Artwork Scope & Selection Manager */}
+          <div className="p-6" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paper }}>
+            <div className="flex items-center justify-between pb-3 border-b mb-5 flex-wrap gap-3" style={{ borderColor: C.rule }}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Layers size={16} style={{ color: C.rust }} />
+                  <h3 style={{ fontFamily: FONT_DISPLAY, fontSize: '1.15rem', fontWeight: 600, color: C.ink }}>
+                    Artwork Scope & Selection ({currentPlan.name} Plan)
+                  </h3>
+                  {isCustomizedCollection ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded font-mono font-medium bg-stone-800 text-white">
+                      Plan-Specific Collection ({currentEconomics.artworkCount} artworks)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded font-mono font-medium bg-stone-200 text-stone-700">
+                      Inheriting Curated Collection ({curatedSummary.validCount} artworks)
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs mt-1" style={{ color: C.inkMuted }}>
+                  Select or remove individual artworks for this {currentPlan.name} proposal. The actual selected artworks determine the plan&apos;s artwork count, area, and initial artwork investment.
+                </p>
+              </div>
+
+              {/* Artwork Source Toggle */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onUpdatePlan && onUpdatePlan(currentPlanId, 'artworkSource', 'curated')}
+                  className="text-xs px-3 py-1.5 font-medium transition-colors"
+                  style={{
+                    backgroundColor: currentPlan.artworkSource !== 'custom' ? C.ink : C.paperDark,
+                    color: currentPlan.artworkSource !== 'custom' ? C.paper : C.ink,
+                    border: `1px solid ${C.rule}`,
+                  }}
+                >
+                  Select from Artworks ({currentEconomics.artworkCount})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdatePlan && onUpdatePlan(currentPlanId, 'artworkSource', 'custom')}
+                  className="text-xs px-3 py-1.5 font-medium transition-colors"
+                  style={{
+                    backgroundColor: currentPlan.artworkSource === 'custom' ? C.ink : C.paperDark,
+                    color: currentPlan.artworkSource === 'custom' ? C.paper : C.ink,
+                    border: `1px solid ${C.rule}`,
+                  }}
+                >
+                  Custom Benchmark Scenario
+                </button>
+              </div>
+            </div>
+
+            {currentPlan.artworkSource === 'custom' ? (
+              /* Custom Benchmark Scenario Mode */
+              <div className="space-y-4">
+                <div className="p-3.5 bg-stone-50 border border-stone-200 text-xs rounded">
+                  <div className="font-semibold text-stone-800 mb-0.5">Benchmark / Custom Scenario Mode</div>
+                  <div className="text-stone-600">
+                    Use custom benchmark inputs to evaluate subscription pricing and payback before physical artworks are chosen.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-2">
+                  <label className="block p-4 border rounded" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
+                    <span className="block text-xs font-medium mb-1" style={{ color: C.inkMuted }}>
+                      Custom Artwork Count
+                    </span>
+                    <div className="flex items-center border-b" style={{ borderColor: C.ink }}>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={currentPlan.customArtworkCount ?? currentPlan.artworkCount ?? 5}
+                        onChange={(e) => onUpdatePlan && onUpdatePlan(currentPlanId, 'customArtworkCount', e.target.value)}
+                        className="w-full bg-transparent py-1 text-xl font-mono font-semibold outline-none"
+                        style={{ color: C.ink }}
+                      />
+                      <span className="text-xs text-stone-500 pl-1 font-mono">artworks</span>
+                    </div>
+                    <span className="text-[10px] text-stone-400 mt-1 block">Pieces included in scope</span>
+                  </label>
+
+                  <label className="block p-4 border rounded" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
+                    <span className="block text-xs font-medium mb-1" style={{ color: C.inkMuted }}>
+                      Custom Total Area
+                    </span>
+                    <div className="flex items-center border-b" style={{ borderColor: C.ink }}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={currentPlan.customTotalArea ?? 60}
+                        onChange={(e) => onUpdatePlan && onUpdatePlan(currentPlanId, 'customTotalArea', e.target.value)}
+                        className="w-full bg-transparent py-1 text-xl font-mono font-semibold outline-none"
+                        style={{ color: C.ink }}
+                      />
+                      <span className="text-xs text-stone-500 pl-1 font-mono">sq ft</span>
+                    </div>
+                    <span className="text-[10px] text-stone-400 mt-1 block">Combined canvas coverage</span>
+                  </label>
+
+                  <label className="block p-4 border rounded" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
+                    <span className="block text-xs font-medium mb-1" style={{ color: C.inkMuted }}>
+                      Custom Initial Artwork Investment
+                    </span>
+                    <div className="flex items-center border-b" style={{ borderColor: C.ink }}>
+                      <span className="text-base font-mono mr-1 text-stone-400">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="500"
+                        value={currentPlan.customInitialInvestment ?? 30000}
+                        onChange={(e) => onUpdatePlan && onUpdatePlan(currentPlanId, 'customInitialInvestment', e.target.value)}
+                        className="w-full bg-transparent py-1 text-xl font-mono font-semibold outline-none"
+                        style={{ color: C.ink }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-stone-400 mt-1 block">Production, stretching & framing</span>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              /* Real Artwork Selection from Inventory / Curated */
+              <div className="space-y-4">
+                {/* Batch Action Toolbar */}
+                <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => onSelectAllPlanPaintings && onSelectAllPlanPaintings(currentPlanId)}
+                      className="px-2.5 py-1 rounded font-medium transition-colors"
+                      style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paperDark, color: C.ink }}
+                    >
+                      Select All Available ({validPaintings.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onClearPlanPaintings && onClearPlanPaintings(currentPlanId)}
+                      className="px-2.5 py-1 rounded font-medium transition-colors"
+                      style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paperDark, color: C.inkMuted }}
+                    >
+                      Clear Selection
+                    </button>
+                    {isCustomizedCollection && (
+                      <button
+                        type="button"
+                        onClick={() => onResetPlanToCurated && onResetPlanToCurated(currentPlanId)}
+                        className="px-2.5 py-1 rounded font-medium transition-colors text-stone-600 hover:text-stone-900"
+                        style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paper }}
+                      >
+                        ↺ Reset to Curated Set ({curatedSummary.validCount})
+                      </button>
+                    )}
+                  </div>
+
+                  {onNavigateToBatch && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToBatch}
+                      className="flex items-center gap-1 font-medium hover:underline text-xs"
+                      style={{ color: C.rust }}
+                    >
+                      <Plus size={12} /> Add New Artwork in Batch Pool
+                    </button>
+                  )}
+                </div>
+
+                {/* Artworks List / Table */}
+                {validPaintings.length === 0 ? (
+                  <div className="p-8 text-center border rounded" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
+                    <p className="text-sm font-medium text-stone-700">
+                      No artwork dimensions entered yet in Artwork Pool (Batch).
+                    </p>
+                    <p className="text-xs text-stone-500 mt-1 max-w-md mx-auto">
+                      Define artwork sizes in Stage 02 BATCH, or switch to Custom Benchmark mode to test plan economics immediately.
+                    </p>
+                    <div className="mt-4 flex items-center justify-center gap-3">
+                      {onNavigateToBatch && (
+                        <button
+                          type="button"
+                          onClick={onNavigateToBatch}
+                          className="px-3 py-1.5 text-xs font-medium"
+                          style={{ backgroundColor: C.ink, color: C.paper }}
+                        >
+                          Go to 02 BATCH
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePlan && onUpdatePlan(currentPlanId, 'artworkSource', 'custom')}
+                        className="px-3 py-1.5 text-xs font-medium border"
+                        style={{ borderColor: C.rule, backgroundColor: C.paper, color: C.ink }}
+                      >
+                        Use Custom Benchmark Mode
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border" style={{ borderColor: C.rule }}>
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.rule}`, backgroundColor: C.paperDark, color: C.inkMuted }}>
+                          <th className="py-2.5 px-3 font-medium text-center" style={{ width: '44px' }}>In Plan</th>
+                          <th className="py-2.5 px-3 font-medium">Artwork Title / ID</th>
+                          <th className="py-2.5 px-3 font-medium">Dimensions</th>
+                          <th className="py-2.5 px-3 font-medium text-right">Area (sq ft)</th>
+                          <th className="py-2.5 px-3 font-medium">Framing &amp; Specs</th>
+                          <th className="py-2.5 px-3 font-medium text-right">Production Cost</th>
+                          <th className="py-2.5 px-3 font-medium text-center" style={{ width: '130px' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {validPaintings.map((p, idx) => {
+                          const isIncluded = planSelectedIdSet.has(p.id);
+                          return (
+                            <tr
+                              key={p.id}
+                              className="transition-colors"
+                              style={{
+                                borderBottom: `1px solid ${C.rule}`,
+                                backgroundColor: isIncluded ? 'rgba(245, 245, 240, 0.7)' : C.paper,
+                              }}
+                            >
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isIncluded}
+                                  onChange={() => onTogglePlanPainting && onTogglePlanPainting(currentPlanId, p.id)}
+                                  className="w-4 h-4 cursor-pointer accent-stone-800"
+                                />
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="font-medium text-stone-900">
+                                  {p.title || `Artwork #${idx + 1}`}
+                                </div>
+                                <div className="text-[10px] font-mono text-stone-400">
+                                  ID: {p.id}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono">
+                                {p.width} × {p.height} {p.unit || 'ft'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono">
+                                {fmtNum(p.cost?.areaSqFt, 1)} sq ft
+                              </td>
+                              <td className="py-2.5 px-3 text-stone-600">
+                                {settings.frameEnabled ? (settings.frameType || 'External Frame') : 'Unframed / Canvas Wrap'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-medium" style={{ color: C.rust }}>
+                                {money(p.cost?.totalProductionCost)}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {isIncluded ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onTogglePlanPainting && onTogglePlanPainting(currentPlanId, p.id)}
+                                    className="text-[11px] font-medium text-red-600 hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <Trash2 size={11} /> Remove
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => onTogglePlanPainting && onTogglePlanPainting(currentPlanId, p.id)}
+                                    className="text-[11px] font-medium text-stone-800 hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <Plus size={11} /> + Add to Plan
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="p-3 bg-stone-50 border border-stone-200 text-stone-700 text-[11px] rounded flex items-center justify-between flex-wrap gap-2">
+                  <span>
+                    <strong>Dynamic Economics:</strong> Changing artworks immediately updates Initial Artwork Investment (<strong>{money(initialInvestment)}</strong>), Simple Recovery (<strong>{simpleRecoveryMonths ? `${fmtNum(simpleRecoveryMonths, 1)} mo` : '—'}</strong>), and Monthly Contribution (<strong>{money(monthlyContribution)}</strong>).
+                  </span>
+                  <span className="font-mono text-stone-500">
+                    Plan Identity: {currentPlan.name} (Never converts into another plan)
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -788,10 +1144,18 @@ export default function SubscriptionView({
                     <span style={{ color: C.inkMuted }}>Artworks In Plan:</span>
                     <span className="font-mono font-medium">{currentEconomics.artworkCount} pieces</span>
                   </div>
-                  {currentPlan.artworkSource !== 'curated' ? (
+                  <div className="flex justify-between py-1 border-b" style={{ borderColor: C.rule }}>
+                    <span style={{ color: C.inkMuted }}>Client Space Size:</span>
+                    <span className="font-mono font-medium">{currentEconomics.spaceSqFt ?? currentPlan.spaceSqFt} sq ft</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b" style={{ borderColor: C.rule }}>
+                    <span style={{ color: C.inkMuted }}>Total Canvas Area:</span>
+                    <span className="font-mono font-medium">{fmtNum(currentEconomics.totalArea, 1)} sq ft</span>
+                  </div>
+                  {currentPlan.artworkSource === 'custom' ? (
                     <label className="block pt-1">
                       <span className="block text-[11px] mb-1" style={{ color: C.inkMuted }}>
-                        Custom Artwork Investment Outlay
+                        Custom Benchmark Artwork Outlay
                       </span>
                       <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
                         <span className="text-xs font-mono mr-1 text-stone-400">{symbol}</span>
@@ -807,12 +1171,16 @@ export default function SubscriptionView({
                     </label>
                   ) : (
                     <div className="flex justify-between py-1 border-b" style={{ borderColor: C.rule }}>
-                      <span style={{ color: C.inkMuted }}>Linked Curated Collection:</span>
-                      <span className="font-mono font-medium">{curatedSummary.validCount} selected</span>
+                      <span style={{ color: C.inkMuted }}>
+                        {isCustomizedCollection ? 'Plan-Specific Collection:' : 'Inherited Curated Set:'}
+                      </span>
+                      <span className="font-mono font-medium">
+                        {currentEconomics.artworkCount} artworks
+                      </span>
                     </div>
                   )}
                   <div className="flex justify-between py-1 border-b" style={{ borderColor: C.rule }}>
-                    <span style={{ color: C.inkMuted }}>Avg Investment / Artwork:</span>
+                    <span style={{ color: C.inkMuted }}>Avg Outlay / Artwork:</span>
                     <span className="font-mono font-medium">
                       {money(initialInvestment / (currentEconomics.artworkCount || 1))}
                     </span>
