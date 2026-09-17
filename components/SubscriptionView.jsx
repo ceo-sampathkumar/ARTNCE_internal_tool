@@ -2096,16 +2096,20 @@ export default function SubscriptionView({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left" style={{ minWidth: 780 }}>
+              <table className="w-full text-left" style={{ minWidth: 960 }}>
                 <thead>
                   <tr className="text-xs uppercase tracking-wider" style={{ borderBottom: `1px solid ${C.rule}`, color: C.inkMuted }}>
                     <th className="py-3 px-4 font-medium">Duration</th>
-                    <th className="py-3 px-4 font-medium text-right">Monthly Revenue</th>
-                    <th className="py-3 px-4 font-medium text-right">Total Revenue</th>
-                    <th className="py-3 px-4 font-medium text-right">Total Operating Costs</th>
-                    <th className="py-3 px-4 font-medium text-right">Total Contribution</th>
-                    <th className="py-3 px-4 font-medium text-right">Artwork Investment</th>
-                    <th className="py-3 px-4 font-medium text-right">Contribution After Investment</th>
+                    <th className="py-3 px-3 font-medium text-right">Monthly Revenue</th>
+                    <th className="py-3 px-3 font-medium text-right">Client Pays</th>
+                    <th className="py-3 px-1 text-center font-mono font-semibold text-stone-400 text-sm select-none" style={{ width: '28px' }}>−</th>
+                    <th className="py-3 px-3 font-medium text-right">Delivery Cost</th>
+                    <th className="py-3 px-1 text-center font-mono font-semibold text-stone-400 text-sm select-none" style={{ width: '28px' }}>=</th>
+                    <th className="py-3 px-3 font-medium text-right">Contribution</th>
+                    <th className="py-3 px-1 text-center font-mono font-semibold text-stone-400 text-sm select-none" style={{ width: '28px' }}>−</th>
+                    <th className="py-3 px-3 font-medium text-right">Artwork Investment</th>
+                    <th className="py-3 px-1 text-center font-mono font-semibold text-stone-400 text-sm select-none" style={{ width: '28px' }}>=</th>
+                    <th className="py-3 px-3 font-medium text-right">Amount Remaining</th>
                     <th className="py-3 px-4 font-medium text-center">Recovered?</th>
                   </tr>
                 </thead>
@@ -2117,27 +2121,39 @@ export default function SubscriptionView({
                       style={{ borderBottom: `1px solid ${C.rule}` }}
                     >
                       <td className="py-3.5 px-4 font-medium" style={{ color: C.ink }}>
-                        {sc.durationLabel}
+                        {sc.months} months
                       </td>
-                      <td className="py-3.5 px-4 text-right tabular font-mono text-xs" style={{ color: C.inkMuted }}>
+                      <td className="py-3.5 px-3 text-right tabular font-mono text-xs" style={{ color: C.inkMuted }}>
                         {money(sc.monthlyRevenue)}
                       </td>
-                      <td className="py-3.5 px-4 text-right tabular font-mono font-medium">
+                      <td className="py-3.5 px-3 text-right tabular font-mono font-medium" style={{ color: C.ink }}>
                         {money(sc.totalRevenue)}
                       </td>
-                      <td className="py-3.5 px-4 text-right tabular font-mono text-xs" style={{ color: C.inkMuted }}>
+                      <td className="py-3.5 px-1 text-center font-mono font-bold text-stone-400 text-sm select-none">
+                        −
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular font-mono text-xs font-medium text-stone-600">
                         {money(sc.operatingCostsTotal)}
                       </td>
+                      <td className="py-3.5 px-1 text-center font-mono font-bold text-stone-400 text-sm select-none">
+                        =
+                      </td>
                       <td
-                        className="py-3.5 px-4 text-right tabular font-mono font-medium"
+                        className="py-3.5 px-3 text-right tabular font-mono font-semibold"
                         style={{ color: sc.totalContribution >= 0 ? C.ink : '#DC2626' }}
                       >
                         {money(sc.totalContribution)}
                       </td>
-                      <td className="py-3.5 px-4 text-right tabular font-mono text-xs" style={{ color: C.inkMuted }}>
+                      <td className="py-3.5 px-1 text-center font-mono font-bold text-stone-400 text-sm select-none">
+                        −
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular font-mono text-xs font-medium text-stone-600">
                         {money(sc.initialInvestment)}
                       </td>
-                      <td className="py-3.5 px-4 text-right tabular font-mono font-semibold">
+                      <td className="py-3.5 px-1 text-center font-mono font-bold text-stone-400 text-sm select-none">
+                        =
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular font-mono font-bold">
                         <span style={{ color: sc.contributionAfterInvestment >= 0 ? C.rust : '#DC2626' }}>
                           {money(sc.contributionAfterInvestment)}
                         </span>
