@@ -159,6 +159,98 @@ export default function CurateView({
           </label>
         </div>
 
+        {/* Project Scope & Curation Economics Inputs */}
+        <div className="mt-6 pt-5 border-t" style={{ borderColor: C.rule }}>
+          <div className="text-xs uppercase tracking-wider font-semibold mb-3" style={{ color: C.inkMuted }}>
+            Project Scope & Curator Workload Justification
+          </div>
+          <p className="text-xs mb-4" style={{ color: C.inkMuted }}>
+            Curator fee is paid on-demand per project/visit (never a recurring monthly salary). Define the site parameters to justify the curation fee.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <label className="block">
+              <span className="block text-xs mb-1" style={{ color: C.inkMuted }}>
+                Space Size (sq ft)
+              </span>
+              <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
+                <input
+                  type="number"
+                  step="any"
+                  value={curationContext.spaceSqFt || ''}
+                  onChange={(e) => onUpdateContext('spaceSqFt', e.target.value)}
+                  placeholder="e.g. 2000"
+                  className="w-full bg-transparent py-1.5 text-sm outline-none tabular font-mono"
+                  style={{ color: C.ink }}
+                />
+                <span className="text-xs text-stone-400 pl-1">sq ft</span>
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="block text-xs mb-1" style={{ color: C.inkMuted }}>
+                Target Artwork Count
+              </span>
+              <div className="flex items-center border-b" style={{ borderColor: C.rule }}>
+                <input
+                  type="number"
+                  step="1"
+                  value={curationContext.artworkCount || selectedCount || ''}
+                  onChange={(e) => onUpdateContext('artworkCount', e.target.value)}
+                  placeholder={String(selectedCount || 5)}
+                  className="w-full bg-transparent py-1.5 text-sm outline-none tabular font-mono"
+                  style={{ color: C.ink }}
+                />
+                <span className="text-xs text-stone-400 pl-1">artworks</span>
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="block text-xs mb-1" style={{ color: C.inkMuted }}>
+                Curation Complexity
+              </span>
+              <select
+                value={curationContext.curationComplexity || 'standard'}
+                onChange={(e) => onUpdateContext('curationComplexity', e.target.value)}
+                className="w-full bg-transparent border-b py-1.5 text-sm outline-none"
+                style={{ borderColor: C.rule, color: C.ink }}
+              >
+                <option value="standard">Standard (Off-the-shelf catalog)</option>
+                <option value="moderate">Moderate (Custom color palette matching)</option>
+                <option value="complex">Complex (Architectural bespoke site curation)</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="block text-xs mb-1 font-medium" style={{ color: C.rust }}>
+                Curator Project Fee (Per Visit/Cycle)
+              </span>
+              <div className="flex items-center border-b" style={{ borderColor: C.rust }}>
+                <span className="text-xs font-mono mr-1 text-stone-400">{symbol}</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={curationContext.curatorProjectFee || ''}
+                  onChange={(e) => onUpdateContext('curatorProjectFee', e.target.value)}
+                  placeholder="e.g. 2000"
+                  className="w-full bg-transparent py-1.5 text-sm outline-none tabular font-mono font-medium"
+                  style={{ color: C.ink }}
+                />
+                <span className="text-xs text-stone-400 pl-1">/ cycle</span>
+              </div>
+            </label>
+          </div>
+
+          <div className="mt-3 p-2.5 rounded text-[11px] flex items-center justify-between flex-wrap gap-2" style={{ backgroundColor: C.paperDark, color: C.inkMuted }}>
+            <span>
+              Basis: Base fee + Artwork workload ({curationContext.artworkCount || selectedCount || 5} artworks) + Space complexity ({curationContext.spaceSqFt ? `${curationContext.spaceSqFt} sq ft` : 'Commercial site'})
+            </span>
+            <span className="font-mono text-stone-700">
+              Paid only when curation work is performed
+            </span>
+          </div>
+        </div>
+
         <div className="mt-4">
           <label className="block">
             <span className="flex items-center gap-1.5 text-xs mb-1" style={{ color: C.inkMuted }}>

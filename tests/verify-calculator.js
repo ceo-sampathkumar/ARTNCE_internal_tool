@@ -7,6 +7,12 @@ import {
   calculatePaintingCost,
   calculateBatchSummary,
   calculateSubscriptionEconomics,
+  calculateCompanyOperatingCosts,
+  calculateCuratorFee,
+  calculatePlanEconomics,
+  DEFAULT_COMPANY_COSTS,
+  DEFAULT_PLANS,
+  createDefaultBatch,
 } from '../lib/calculator.js';
 
 let passed = 0;
@@ -181,6 +187,128 @@ const subPropagated = calculateSubscriptionEconomics({
 });
 assert(subPropagated.initialInvestment === curatedNewSummary.totalProductionCost, 'Subscription initial investment updates with new settings');
 assert(subPropagated.monthlySubscription === 10000, 'Subscription monthly price does NOT change automatically');
+
+// 13. Batch Empty Starter Rows Test
+const defaultBatch = createDefaultBatch();
+assert(defaultBatch.length === 5, 'Starter batch has 5 slots');
+const defaultBatchSummary = calculateBatchSummary(defaultBatch, DEFAULT_SETTINGS);
+assert(defaultBatchSummary.count === 5, 'Starter batch count is 5 slots');
+assert(defaultBatchSummary.validCount === 0, 'Starter batch has 0 valid/calculated paintings');
+assert(defaultBatchSummary.totalProductionCost === 0, 'Empty starter batch total production cost is ₹0');
+
+// 14. Company Operating Costs & Employee Pool Test
+const defaultCompanyCosts = calculateCompanyOperatingCosts(DEFAULT_COMPANY_COSTS);
+assert(defaultCompanyCosts.employeeCount === 3, 'Employee count is 3');
+assertClose(defaultCompanyCosts.totalEmployeeSalary, 300000, 0.01, '3 employees combined = ₹3,00,000 TOTAL per month (not per employee)');
+
+// Add, edit, remove employee test
+const customEmployees = [
+  ...DEFAULT_COMPANY_COSTS.employees,
+  { id: 'emp_4', name: 'Apprentice', role: 'Support', monthlySalary: 50000 },
+];
+const updatedCompanyCosts = calculateCompanyOperatingCosts({
+  ...DEFAULT_COMPANY_COSTS,
+  employees: customEmployees,
+});
+assert(updatedCompanyCosts.employeeCount === 4, 'Can add employee to pool');
+assertClose(updatedCompanyCosts.totalEmployeeSalary, 350000, 0.01, 'Employee pool sum updates when employee is added');
+
+// 15. Bike Reimbursement Test
+assertClose(defaultCompanyCosts.bikeRate, 3, 0.01, 'Bike reimbursement rate is ₹3 per km');
+assertClose(defaultCompanyCosts.bikeKm, 2000, 0.01, 'Default company purpose km is 2,000 km');
+assertClose(defaultCompanyCosts.monthlyBikeReimbursement, 6000, 0.01, 'Bike reimbursement: 2,000 km × ₹3 = ₹6,000/month');
+
+// 16. Employee Allocation Test
+const profEconomics = calculatePlanEconomics(
+  DEFAULT_PLANS.professional,
+  DEFAULT_COMPANY_COSTS,
+  curatedSummary,
+  DEFAULT_SETTINGS
+);
+assertClose(profEconomics.companyEmployeePool, 300000, 0.01, 'Professional plan accesses ₹3,00,000 company employee pool');
+assertClose(profEconomics.allocatedEmployeeSalary, 60000, 0.01, '20% allocation of ₹3,00,000 = ₹60,000/month (not 100%)');
+assert(profEconomics.allocatedEmployeeSalary < profEconomics.companyEmployeePool, 'Does not charge 100% of employee pool to single plan');
+
+// 17. Curator Project/Cycle Cost Test (NOT monthly salary)
+const singleCycleCurator = calculateCuratorFee({ feePerCycle: 2000, cycles: 1 });
+assertClose(singleCycleCurator.totalCuratorCost, 2000, 0.01, 'Curator fee: 1 visit at ₹2,000 = ₹2,000 total');
+const twoCycleCurator = calculateCuratorFee({ feePerCycle: 2000, cycles: 2 });
+assertClose(twoCycleCurator.totalCuratorCost, 4000, 0.01, 'Curator fee across 2 recycle cycles at ₹2,000 = ₹4,000 total');
+
+// 18. Distinct Cost Categories Test
+assert(profEconomics.curator.totalCuratorCost === 2000, 'Curator project fee is categorized under project costs');
+assert(profEconomics.installation.total === 1500, 'Installation is categorized separately');
+assert(profEconomics.logistics.total === 1200, 'Logistics is categorized separately');
+assert(profEconomics.maintenanceMonthly === 500, 'Maintenance is categorized under monthly recurring');
+assert(profEconomics.artistRecurringMonthly === 1000, 'Artist recurring payment is categorized under monthly recurring');
+
+// 19. All Four Plans Calculate Independently
+const essentialEcon = calculatePlanEconomics(DEFAULT_PLANS.essential, DEFAULT_COMPANY_COSTS);
+const enterpriseEcon = calculatePlanEconomics(DEFAULT_PLANS.enterprise, DEFAULT_COMPANY_COSTS);
+const signatureEcon = calculatePlanEconomics(DEFAULT_PLANS.signature, DEFAULT_COMPANY_COSTS);
+
+assert(essentialEcon.monthlySubscription === 6500, 'Essential monthly subscription is independent');
+assert(enterpriseEcon.monthlySubscription === 25000, 'Enterprise monthly subscription is independent');
+assert(signatureEcon.monthlySubscription === 18000, 'Signature monthly subscription is independent');
+assert(essentialEcon.allocatedEmployeeSalary !== enterpriseEcon.allocatedEmployeeSalary, 'Employee allocations differ between plans');
+
+// Signature supports custom inputs
+const customSignaturePlan = {
+  ...DEFAULT_PLANS.signature,
+  spaceSqFt: 4200,
+  artworkCount: 10,
+  customInitialInvestment: 65000,
+  monthlySubscription: 22000,
+};
+const customSignatureEcon = calculatePlanEconomics(customSignaturePlan, DEFAULT_COMPANY_COSTS);
+assert(customSignatureEcon.initialInvestment === 65000, 'Signature allows custom initial artwork investment');
+assert(customSignatureEcon.monthlySubscription === 22000, 'Signature allows custom monthly subscription price');
+
+// 20. Empty Initial Investment Handling Test
+const zeroInvestmentEcon = calculateSubscriptionEconomics({
+  initialInvestment: 0,
+  monthlySubscription: 10000,
+  operatingCosts: 4000,
+});
+assert(zeroInvestmentEcon.simpleRecoveryMonths === null, 'Simple recovery is null when initial investment is 0');
+assert(zeroInvestmentEcon.estimatedRecoveryMonths === null, 'Estimated recovery is null when initial investment is 0');
+assert(zeroInvestmentEcon.isRecoveryAchievable === false, 'Recovery achievable is false when initial investment is 0');
+assert(zeroInvestmentEcon.unachievableReason.includes('No curated artworks selected'), 'Shows "No curated artworks selected" message');
+assert(zeroInvestmentEcon.scenarios[0].isRecovered === false, 'Does not display Recovered: Yes when investment is 0');
+
+// 21. Specification Section 19 Exact Benchmark Test
+const sec19 = calculateSubscriptionEconomics({
+  initialInvestment: 30000,
+  monthlySubscription: 10000,
+  monthlyOperatingCosts: 4000,
+});
+assertClose(sec19.monthlyContribution, 6000, 0.01, 'Section 19: Monthly Contribution is ₹6,000');
+assertClose(sec19.simpleRecoveryMonths, 3, 0.01, 'Section 19: Simple Artwork Recovery is 3 months');
+assertClose(sec19.estimatedRecoveryMonths, 5, 0.01, 'Section 19: Estimated Investment Recovery is 5 months');
+
+const sec19_3 = sec19.scenarios.find((s) => s.months === 3);
+assertClose(sec19_3.totalRevenue, 30000, 0.01, 'Section 19: 3 mo revenue is ₹30,000');
+assertClose(sec19_3.operatingCostsTotal, 12000, 0.01, 'Section 19: 3 mo operating costs is ₹12,000');
+assertClose(sec19_3.totalContribution, 18000, 0.01, 'Section 19: 3 mo contribution is ₹18,000');
+assertClose(sec19_3.contributionAfterInvestment, -12000, 0.01, 'Section 19: 3 mo contribution after investment is -₹12,000');
+
+const sec19_6 = sec19.scenarios.find((s) => s.months === 6);
+assertClose(sec19_6.totalRevenue, 60000, 0.01, 'Section 19: 6 mo revenue is ₹60,000');
+assertClose(sec19_6.operatingCostsTotal, 24000, 0.01, 'Section 19: 6 mo operating costs is ₹24,000');
+assertClose(sec19_6.totalContribution, 36000, 0.01, 'Section 19: 6 mo contribution is ₹36,000');
+assertClose(sec19_6.contributionAfterInvestment, 6000, 0.01, 'Section 19: 6 mo contribution after investment is ₹6,000');
+
+const sec19_12 = sec19.scenarios.find((s) => s.months === 12);
+assertClose(sec19_12.totalRevenue, 120000, 0.01, 'Section 19: 12 mo revenue is ₹1,20,000');
+assertClose(sec19_12.operatingCostsTotal, 48000, 0.01, 'Section 19: 12 mo operating costs is ₹48,000');
+assertClose(sec19_12.totalContribution, 72000, 0.01, 'Section 19: 12 mo contribution is ₹72,000');
+assertClose(sec19_12.contributionAfterInvestment, 42000, 0.01, 'Section 19: 12 mo contribution after investment is ₹42,000');
+
+const sec19_24 = sec19.scenarios.find((s) => s.months === 24);
+assertClose(sec19_24.totalRevenue, 240000, 0.01, 'Section 19: 24 mo revenue is ₹2,40,000');
+assertClose(sec19_24.operatingCostsTotal, 96000, 0.01, 'Section 19: 24 mo operating costs is ₹96,000');
+assertClose(sec19_24.totalContribution, 144000, 0.01, 'Section 19: 24 mo contribution is ₹1,44,000');
+assertClose(sec19_24.contributionAfterInvestment, 114000, 0.01, 'Section 19: 24 mo contribution after investment is ₹1,14,000');
 
 console.log('\n========================================');
 console.log(`Total tests: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);

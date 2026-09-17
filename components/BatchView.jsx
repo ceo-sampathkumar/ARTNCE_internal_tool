@@ -75,12 +75,15 @@ export default function BatchView({
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
           <div>
-            <div className="text-xs" style={{ color: C.inkMuted }}>Artworks</div>
+            <div className="text-xs" style={{ color: C.inkMuted }}>Artwork Slots</div>
             <div
               className="tabular mt-1 text-2xl font-semibold"
               style={{ fontFamily: FONT_MONO, color: C.ink }}
             >
-              {batchSummary.validCount} <span className="text-sm font-normal text-stone-500">/ {batchSummary.count}</span>
+              {batchSummary.validCount} <span className="text-sm font-normal text-stone-500">/ {batchSummary.count} calculated</span>
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: C.inkMuted }}>
+              Slots: {batchSummary.count} | Valid: {batchSummary.validCount}
             </div>
           </div>
           <div>

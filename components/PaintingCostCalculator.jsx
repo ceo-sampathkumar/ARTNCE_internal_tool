@@ -32,17 +32,24 @@ import {
   calculatePaintingCost,
   calculateBatchSummary,
   calculateSubscriptionEconomics,
+  calculateCompanyOperatingCosts,
+  calculateCuratorFee,
+  calculatePlanEconomics,
 } from '@/lib/calculator';
 import {
   DEFAULT_SETTINGS,
   DEFAULT_PRICING,
   DEFAULT_CURATION_CONTEXT,
   DEFAULT_SUBSCRIPTION,
+  DEFAULT_COMPANY_COSTS,
+  DEFAULT_PLANS,
   STORAGE_KEY,
   STORAGE_KEY_BATCH,
   STORAGE_KEY_CURATION,
   STORAGE_KEY_SUBSCRIPTION,
   STORAGE_KEY_QUOTES,
+  STORAGE_KEY_COMPANY_COSTS,
+  STORAGE_KEY_PLANS,
   createEmptyPainting,
   createDefaultBatch,
   makeId,
@@ -201,6 +208,11 @@ export default function PaintingCostCalculator() {
   // Subscription model state (Stage 04 SUBSCRIPTION)
   const [subscriptionState, setSubscriptionState] = useState(DEFAULT_SUBSCRIPTION);
 
+  // Multi-Plan Subscription Economics & Company Cost Assumptions
+  const [companyCosts, setCompanyCosts] = useState(DEFAULT_COMPANY_COSTS);
+  const [plans, setPlans] = useState(DEFAULT_PLANS);
+  const [activePlanId, setActivePlanId] = useState('professional');
+
   // General & persistence state
   const [loaded, setLoaded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -254,6 +266,44 @@ export default function PaintingCostCalculator() {
                 ...(parsedSubscription.operatingCosts || {}),
               },
             }));
+          }
+
+          // Load company costs model
+          const localCompany = window.localStorage.getItem(STORAGE_KEY_COMPANY_COSTS);
+          if (localCompany) {
+            try {
+              const parsedComp = JSON.parse(localCompany);
+              setCompanyCosts((prev) => ({
+                ...prev,
+                ...parsedComp,
+                employees:
+                  Array.isArray(parsedComp.employees) && parsedComp.employees.length > 0
+                    ? parsedComp.employees
+                    : prev.employees,
+                bikeReimbursement: {
+                  ...prev.bikeReimbursement,
+                  ...(parsedComp.bikeReimbursement || {}),
+                },
+              }));
+            } catch (e) {
+              console.warn('Failed to parse company costs:', e);
+            }
+          }
+
+          // Load multi-plan assumptions
+          const localPlans = window.localStorage.getItem(STORAGE_KEY_PLANS);
+          if (localPlans) {
+            try {
+              const parsedPlans = JSON.parse(localPlans);
+              if (parsedPlans && typeof parsedPlans === 'object') {
+                setPlans((prev) => ({
+                  ...prev,
+                  ...parsedPlans,
+                }));
+              }
+            } catch (e) {
+              console.warn('Failed to parse plans:', e);
+            }
           }
 
           // Load quotes list
@@ -312,10 +362,18 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY_BATCH, JSON.stringify(paintings));
       window.localStorage.setItem(STORAGE_KEY_CURATION, JSON.stringify(curationContext));
       window.localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(subscriptionState));
+      window.localStorage.setItem(STORAGE_KEY_COMPANY_COSTS, JSON.stringify(companyCosts));
+      window.localStorage.setItem(STORAGE_KEY_PLANS, JSON.stringify(plans));
     } catch (e) {
       console.warn('LocalStorage write error:', e);
     }
-  }, [settings, pricing, paintings, curationContext, subscriptionState, loaded]);
+  }, [settings, pricing, paintings, curationContext, subscriptionState, companyCosts, plans, loaded]);
+
+  // Robust tab navigation: ALWAYS closes Settings drawer when switching sections
+  const handleNavigateTab = (tab) => {
+    setSettingsOpen(false);
+    setActiveTab(tab);
+  };
 
   // Settings update helper
   const setField = (key) => (value) => setSettings((s) => ({ ...s, [key]: value }));
@@ -405,7 +463,7 @@ export default function PaintingCostCalculator() {
     return calculateBatchSummary(curatedPaintings, settings);
   }, [curatedPaintings, settings]);
 
-  // 4. Subscription economics calculation (SUBSCRIPTION Stage)
+  // 4. Subscription economics calculation (SUBSCRIPTION Stage - Legacy Single)
   const subscriptionEconomics = useMemo(() => {
     return calculateSubscriptionEconomics({
       initialInvestment: curatedSummary.totalProductionCost,
@@ -414,9 +472,88 @@ export default function PaintingCostCalculator() {
     });
   }, [curatedSummary.totalProductionCost, subscriptionState]);
 
+  // 5. Multi-Plan Economics Engine (Essential, Professional, Enterprise, Signature)
+  const plansEconomics = useMemo(() => {
+    return {
+      essential: calculatePlanEconomics(plans.essential, companyCosts, curatedSummary, settings),
+      professional: calculatePlanEconomics(plans.professional, companyCosts, curatedSummary, settings),
+      enterprise: calculatePlanEconomics(plans.enterprise, companyCosts, curatedSummary, settings),
+      signature: calculatePlanEconomics(plans.signature, companyCosts, curatedSummary, settings),
+    };
+  }, [plans, companyCosts, curatedSummary, settings]);
+
   const symbol = settings.currencySymbol || '₹';
   const decimals = num(settings.decimals, 0);
   const money = (v) => fmtCurrency(v, symbol, decimals);
+
+  /* -----------------------------------------------------------------------
+   * Multi-Plan & Company Cost Management Handlers
+   * ---------------------------------------------------------------------*/
+  const handleUpdatePlan = (planId, field, value) => {
+    setPlans((prev) => ({
+      ...prev,
+      [planId]: {
+        ...prev[planId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleUpdatePlanNested = (planId, section, field, value) => {
+    setPlans((prev) => ({
+      ...prev,
+      [planId]: {
+        ...prev[planId],
+        [section]: {
+          ...prev[planId]?.[section],
+          [field]: value,
+        },
+      },
+    }));
+  };
+
+  const handleUpdateCompanyCosts = (field, value) => {
+    setCompanyCosts((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleUpdateEmployee = (id, field, value) => {
+    setCompanyCosts((prev) => ({
+      ...prev,
+      employees: (prev.employees || []).map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+    }));
+  };
+
+  const handleAddEmployee = () => {
+    setCompanyCosts((prev) => ({
+      ...prev,
+      employees: [
+        ...(prev.employees || []),
+        {
+          id: `emp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+          name: 'New Art Handler',
+          role: 'Logistics & Installation',
+          monthlySalary: 0,
+        },
+      ],
+    }));
+  };
+
+  const handleRemoveEmployee = (id) => {
+    setCompanyCosts((prev) => ({
+      ...prev,
+      employees: (prev.employees || []).filter((e) => e.id !== id),
+    }));
+  };
+
+  const handleUpdateBikeReimbursement = (field, value) => {
+    setCompanyCosts((prev) => ({
+      ...prev,
+      bikeReimbursement: {
+        ...prev.bikeReimbursement,
+        [field]: value,
+      },
+    }));
+  };
 
   /* -----------------------------------------------------------------------
    * Batch Management Handlers
@@ -634,7 +771,7 @@ export default function PaintingCostCalculator() {
             {/* Step 01: COST */}
             <button
               type="button"
-              onClick={() => setActiveTab('cost')}
+              onClick={() => handleNavigateTab('cost')}
               className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
               style={{
                 backgroundColor: activeTab === 'cost' ? C.ink : 'transparent',
@@ -652,7 +789,7 @@ export default function PaintingCostCalculator() {
             {/* Step 02: BATCH */}
             <button
               type="button"
-              onClick={() => setActiveTab('batch')}
+              onClick={() => handleNavigateTab('batch')}
               className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
               style={{
                 backgroundColor: activeTab === 'batch' ? C.ink : 'transparent',
@@ -679,7 +816,7 @@ export default function PaintingCostCalculator() {
             {/* Step 03: CURATE */}
             <button
               type="button"
-              onClick={() => setActiveTab('curate')}
+              onClick={() => handleNavigateTab('curate')}
               className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
               style={{
                 backgroundColor: activeTab === 'curate' ? C.ink : 'transparent',
@@ -706,7 +843,7 @@ export default function PaintingCostCalculator() {
             {/* Step 04: SUBSCRIPTION */}
             <button
               type="button"
-              onClick={() => setActiveTab('subscription')}
+              onClick={() => handleNavigateTab('subscription')}
               className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
               style={{
                 backgroundColor: activeTab === 'subscription' ? C.ink : 'transparent',
@@ -1185,7 +1322,7 @@ export default function PaintingCostCalculator() {
             onRemovePainting={handleRemovePainting}
             batchSummary={batchSummary}
             settings={settings}
-            onNavigateToCurate={() => setActiveTab('curate')}
+            onNavigateToCurate={() => handleNavigateTab('curate')}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
@@ -1204,8 +1341,8 @@ export default function PaintingCostCalculator() {
             onSelectAll={handleSelectAllValid}
             onDeselectAll={handleDeselectAll}
             settings={settings}
-            onNavigateToSubscription={() => setActiveTab('subscription')}
-            onNavigateToBatch={() => setActiveTab('batch')}
+            onNavigateToSubscription={() => handleNavigateTab('subscription')}
+            onNavigateToBatch={() => handleNavigateTab('batch')}
           />
         )}
 
@@ -1216,13 +1353,25 @@ export default function PaintingCostCalculator() {
           <SubscriptionView
             curatedSummary={curatedSummary}
             curationContext={curationContext}
+            companyCosts={companyCosts}
+            onUpdateCompanyCosts={handleUpdateCompanyCosts}
+            onUpdateEmployee={handleUpdateEmployee}
+            onAddEmployee={handleAddEmployee}
+            onRemoveEmployee={handleRemoveEmployee}
+            onUpdateBikeReimbursement={handleUpdateBikeReimbursement}
+            plans={plans}
+            activePlanId={activePlanId}
+            onChangeActivePlanId={setActivePlanId}
+            onUpdatePlan={handleUpdatePlan}
+            onUpdatePlanNested={handleUpdatePlanNested}
+            plansEconomics={plansEconomics}
             subscriptionState={subscriptionState}
             onUpdateSubscription={handleUpdateSubscription}
             onUpdateOperatingCost={handleUpdateOperatingCost}
             subscriptionEconomics={subscriptionEconomics}
             settings={settings}
             onSaveSnapshot={saveSnapshot}
-            onNavigateToCurate={() => setActiveTab('curate')}
+            onNavigateToCurate={() => handleNavigateTab('curate')}
           />
         )}
       </div>
