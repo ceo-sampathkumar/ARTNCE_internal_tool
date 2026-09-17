@@ -10,9 +10,12 @@ import {
   calculateCompanyOperatingCosts,
   calculateCuratorFee,
   calculatePlanEconomics,
+  calculatePortfolioSustainability,
   DEFAULT_COMPANY_COSTS,
   DEFAULT_PLANS,
+  DEFAULT_PORTFOLIO_MIX,
   createDefaultBatch,
+  createDefaultCustomPlan,
 } from '../lib/calculator.js';
 
 let passed = 0;
@@ -453,6 +456,181 @@ const econFixedCostB = calculatePlanEconomics(planFixedCostB, DEFAULT_COMPANY_CO
 assertClose(econFixedCostA.initialInvestment, econFixedCostB.initialInvestment, 0.0001, 'Artwork production cost is identical regardless of subscription price');
 assert(econFixedCostB.monthlyContribution > econFixedCostA.monthlyContribution, 'Higher subscription price yields higher contribution');
 assert(econFixedCostB.simpleRecoveryMonths < econFixedCostA.simpleRecoveryMonths, 'Higher subscription price yields faster simple recovery');
+
+// =========================================================================
+// TEST 32: Plan values NEVER cross-contaminate (Complete Independence)
+// =========================================================================
+console.log('\n--- Test 32: Plan values NEVER cross-contaminate ---');
+const isolatedPlans = {
+  essential: { ...DEFAULT_PLANS.essential },
+  professional: { ...DEFAULT_PLANS.professional },
+  enterprise: { ...DEFAULT_PLANS.enterprise },
+  signature: { ...DEFAULT_PLANS.signature },
+};
+
+// 1. Changing Professional subscription from 10,000 to 15,000
+isolatedPlans.professional = { ...isolatedPlans.professional, monthlySubscription: 15000 };
+assert(isolatedPlans.professional.monthlySubscription === 15000, 'Professional subscription updated to 15,000');
+assert(isolatedPlans.enterprise.monthlySubscription === 25000, 'Enterprise subscription remains untouched at 25,000');
+assert(isolatedPlans.essential.monthlySubscription === 6500, 'Essential subscription remains untouched at 6,500');
+assert(isolatedPlans.signature.monthlySubscription === 18000, 'Signature subscription remains untouched at 18,000');
+
+// 2. Changing Professional artwork count from 5 to 8
+isolatedPlans.professional = { ...isolatedPlans.professional, customArtworkCount: 8 };
+assert(isolatedPlans.professional.customArtworkCount === 8, 'Professional artwork count changed to 8');
+assert(isolatedPlans.essential.customArtworkCount === 3, 'Essential artwork count remains untouched at 3');
+assert(isolatedPlans.enterprise.customArtworkCount === 12, 'Enterprise artwork count remains untouched at 12');
+
+// 3. Changing Enterprise maintenance from 1,500 to 3,000
+isolatedPlans.enterprise = { ...isolatedPlans.enterprise, maintenanceMonthly: 3000 };
+assert(isolatedPlans.enterprise.maintenanceMonthly === 3000, 'Enterprise maintenance changed to 3,000');
+assert(isolatedPlans.professional.maintenanceMonthly === 500, 'Professional maintenance remains untouched at 500');
+assert(isolatedPlans.essential.maintenanceMonthly === 300, 'Essential maintenance remains untouched at 300');
+
+// 4. Changing Essential employee allocation from 5% to 15%
+isolatedPlans.essential = { ...isolatedPlans.essential, employeeAllocationPercent: 15 };
+assert(isolatedPlans.essential.employeeAllocationPercent === 15, 'Essential employee allocation updated to 15%');
+assert(isolatedPlans.professional.employeeAllocationPercent === 20, 'Professional employee allocation remains untouched at 20%');
+assert(isolatedPlans.enterprise.employeeAllocationPercent === 35, 'Enterprise employee allocation remains untouched at 35%');
+
+// 5. Changing Professional rotation cycles from 1 to 3
+isolatedPlans.professional = {
+  ...isolatedPlans.professional,
+  rotation: { ...isolatedPlans.professional.rotation, cycles: 3 },
+};
+assert(isolatedPlans.professional.rotation.cycles === 3, 'Professional rotation cycles changed to 3');
+assert(isolatedPlans.essential.rotation.cycles === 1, 'Essential rotation cycles remains untouched at 1');
+assert(isolatedPlans.enterprise.rotation.cycles === 4, 'Enterprise rotation cycles remains untouched at 4');
+
+// 6. Changing Enterprise packaging from 1,200 to 2,000
+isolatedPlans.enterprise = {
+  ...isolatedPlans.enterprise,
+  packaging: { ...isolatedPlans.enterprise.packaging, feePerCycle: 2000 },
+};
+assert(isolatedPlans.enterprise.packaging.feePerCycle === 2000, 'Enterprise packaging fee changed to 2,000');
+assert(isolatedPlans.professional.packaging.feePerCycle === 600, 'Professional packaging fee remains untouched at 600');
+assert(isolatedPlans.essential.packaging.feePerCycle === 400, 'Essential packaging fee remains untouched at 400');
+
+// Verify output economic models evaluate completely independently
+const econEss = calculatePlanEconomics(isolatedPlans.essential, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+const econProf = calculatePlanEconomics(isolatedPlans.professional, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+const econEnt = calculatePlanEconomics(isolatedPlans.enterprise, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+const econSig = calculatePlanEconomics(isolatedPlans.signature, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+
+assert(econProf.monthlySubscription === 15000, 'Evaluated Professional subscription is 15,000');
+assert(econEnt.monthlySubscription === 25000, 'Evaluated Enterprise subscription is 25,000');
+assert(econEss.monthlySubscription === 6500, 'Evaluated Essential subscription is 6,500');
+assert(econSig.monthlySubscription === 18000, 'Evaluated Signature subscription is 18,000');
+
+// =========================================================================
+// TEST 33: Whiteboard Model for Every Plan (2-Tier Waterfall)
+// =========================================================================
+console.log('\n--- Test 33: Whiteboard Model 2-Tier Contribution Waterfall ---');
+[econEss, econProf, econEnt, econSig].forEach((econ) => {
+  // Level 1: Client Contribution Before Company Overhead
+  const expectedLevel1 = econ.monthlySubscription - econ.totalMonthlyClientDeliveryCost;
+  assertClose(
+    econ.monthlyContributionBeforeOverhead,
+    expectedLevel1,
+    0.001,
+    `[${econ.planName}] Level 1 Client Contribution = Subscription (${econ.monthlySubscription}) - Direct Delivery (${econ.totalMonthlyClientDeliveryCost})`
+  );
+
+  // Level 2: Contribution After Company Overhead Allocation
+  const expectedLevel2 = econ.monthlyContributionBeforeOverhead - econ.totalCompanyOverheadAllocation;
+  assertClose(
+    econ.monthlyContribution,
+    expectedLevel2,
+    0.001,
+    `[${econ.planName}] Level 2 Contribution After Overhead = Client Contribution (${econ.monthlyContributionBeforeOverhead}) - Allocated Overhead (${econ.totalCompanyOverheadAllocation})`
+  );
+});
+
+// =========================================================================
+// TEST 34: Rotation and Packaging are Independent Project Cycles
+// =========================================================================
+console.log('\n--- Test 34: Rotation and Packaging independent per plan ---');
+assert(econEss.rotation.total === 1000, 'Essential rotation is 1 cycle @ ₹1,000 = ₹1,000');
+assert(econProf.rotation.total === 4500, 'Professional rotation is 3 cycles @ ₹1,500 = ₹4,500');
+assert(econEnt.rotation.total === 12000, 'Enterprise rotation is 4 cycles @ ₹3,000 = ₹12,000');
+assert(econEss.packaging.total === 400, 'Essential packaging is 1 cycle @ ₹400 = ₹400');
+assert(econEnt.packaging.total === 8000, 'Enterprise packaging is 4 cycles @ ₹2,000 = ₹8,000');
+
+// Project costs must NOT be included in monthly direct delivery costs
+assert(
+  econEss.totalMonthlyClientDeliveryCost ===
+    econEss.maintenanceMonthly +
+    econEss.artistRecurringMonthly +
+    econEss.manpowerMonthly +
+    econEss.travelMonthlyAllocation +
+    econEss.packagingMonthly,
+  'Monthly client delivery cost contains only direct monthly items, not project cycles'
+);
+
+// =========================================================================
+// TEST 35: Custom Plan Creation & Independence
+// =========================================================================
+console.log('\n--- Test 35: Custom Plan Creation & Independence ---');
+const customPlan = createDefaultCustomPlan('custom_vip_99', 'VIP Flagship Plan');
+assert(customPlan.id === 'custom_vip_99', 'Custom plan ID initialized correctly');
+assert(customPlan.name === 'VIP Flagship Plan', 'Custom plan name initialized correctly');
+assert(customPlan.isCustom === true, 'Custom plan flagged as isCustom');
+assert(typeof customPlan.monthlySubscription === 'number', 'Custom plan has independent monthlySubscription');
+assert(typeof customPlan.curator === 'object', 'Custom plan has independent curator configuration');
+assert(typeof customPlan.rotation === 'object', 'Custom plan has independent rotation configuration');
+assert(typeof customPlan.packaging === 'object', 'Custom plan has independent packaging configuration');
+
+const customEcon = calculatePlanEconomics(customPlan, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings);
+assert(customEcon.planId === 'custom_vip_99', 'Custom plan economics evaluates correctly');
+assert(customEcon.monthlyContributionBeforeOverhead > 0, 'Custom plan computes Level 1 Client Contribution');
+assert(typeof customEcon.monthlyContribution === 'number', 'Custom plan computes Level 2 Contribution After Overhead');
+
+// Modifying custom plan does not alter DEFAULT_PLANS
+customPlan.monthlySubscription = 45000;
+assert(DEFAULT_PLANS.professional.monthlySubscription === 10000, 'Standard plans untouched when custom plan modified');
+
+// =========================================================================
+// TEST 36: Company Sustainability & Portfolio Mix Model
+// =========================================================================
+console.log('\n--- Test 36: Company Sustainability & Portfolio Mix ---');
+const allPlansDict = {
+  essential: DEFAULT_PLANS.essential,
+  professional: DEFAULT_PLANS.professional,
+  enterprise: DEFAULT_PLANS.enterprise,
+  signature: DEFAULT_PLANS.signature,
+};
+
+const allEconsDict = {
+  essential: calculatePlanEconomics(DEFAULT_PLANS.essential, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings),
+  professional: calculatePlanEconomics(DEFAULT_PLANS.professional, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings),
+  enterprise: calculatePlanEconomics(DEFAULT_PLANS.enterprise, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings),
+  signature: calculatePlanEconomics(DEFAULT_PLANS.signature, DEFAULT_COMPANY_COSTS, null, DEFAULT_SETTINGS, poolSummary.calculatedPaintings),
+};
+
+// Portfolio A: 20 Essential, 10 Professional, 5 Enterprise, 2 Signature
+const portfolioMixA = { essential: 20, professional: 10, enterprise: 5, signature: 2 };
+const sustainA = calculatePortfolioSustainability(allPlansDict, portfolioMixA, DEFAULT_COMPANY_COSTS, allEconsDict);
+
+assert(sustainA.totalActiveClients === 37, 'Portfolio A has 20+10+5+2 = 37 active clients');
+const expectedRevA = 20 * 6500 + 10 * 10000 + 5 * 25000 + 2 * 18000; // 130000 + 100000 + 125000 + 36000 = 391000
+assert(sustainA.totalMonthlySubscriptionRevenue === expectedRevA, `Portfolio A total revenue is ₹${expectedRevA}`);
+assert(sustainA.companyRecurringCost === 306000, 'Company recurring cost pool is ₹3,06,000 (₹3,00,000 staff + ₹6,000 bike)');
+assert(
+  sustainA.portfolioContributionAfterCompanyRecurringCosts ===
+    sustainA.totalMonthlyClientContributionBeforeOverhead - sustainA.companyRecurringCost,
+  'Portfolio net contribution correctly subtracts ₹3,06,000 company pool from client contribution'
+);
+assert(sustainA.portfolioBreakevenClients > 0, 'Portfolio breakeven active clients is calculated');
+assert(typeof sustainA.isSustainable === 'boolean', 'Portfolio sustainability boolean flag computed');
+
+// Portfolio B: Alternate mix (5 Essential, 15 Professional, 10 Enterprise, 3 Signature)
+const portfolioMixB = { essential: 5, professional: 15, enterprise: 10, signature: 3 };
+const sustainB = calculatePortfolioSustainability(allPlansDict, portfolioMixB, DEFAULT_COMPANY_COSTS, allEconsDict);
+
+assert(sustainB.totalActiveClients === 33, 'Portfolio B has 5+15+10+3 = 33 active clients');
+const expectedRevB = 5 * 6500 + 15 * 10000 + 10 * 25000 + 3 * 18000; // 32500 + 150000 + 250000 + 54000 = 486500
+assert(sustainB.totalMonthlySubscriptionRevenue === expectedRevB, `Portfolio B total revenue is ₹${expectedRevB}`);
+assert(sustainB.totalMonthlySubscriptionRevenue !== sustainA.totalMonthlySubscriptionRevenue, 'Portfolio B calculates independently from Portfolio A');
 
 console.log('\n========================================');
 console.log(`Total tests: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);

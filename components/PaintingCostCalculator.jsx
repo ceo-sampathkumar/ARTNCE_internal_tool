@@ -35,6 +35,7 @@ import {
   calculateCompanyOperatingCosts,
   calculateCuratorFee,
   calculatePlanEconomics,
+  calculatePortfolioSustainability,
 } from '@/lib/calculator';
 import {
   DEFAULT_SETTINGS,
@@ -43,6 +44,8 @@ import {
   DEFAULT_SUBSCRIPTION,
   DEFAULT_COMPANY_COSTS,
   DEFAULT_PLANS,
+  DEFAULT_PORTFOLIO_MIX,
+  createDefaultCustomPlan,
   STORAGE_KEY,
   STORAGE_KEY_BATCH,
   STORAGE_KEY_CURATION,
@@ -50,6 +53,7 @@ import {
   STORAGE_KEY_QUOTES,
   STORAGE_KEY_COMPANY_COSTS,
   STORAGE_KEY_PLANS,
+  STORAGE_KEY_PORTFOLIO,
   createEmptyPainting,
   createDefaultBatch,
   makeId,
@@ -212,6 +216,7 @@ export default function PaintingCostCalculator() {
   const [companyCosts, setCompanyCosts] = useState(DEFAULT_COMPANY_COSTS);
   const [plans, setPlans] = useState(DEFAULT_PLANS);
   const [activePlanId, setActivePlanId] = useState('professional');
+  const [portfolioClients, setPortfolioClients] = useState(DEFAULT_PORTFOLIO_MIX);
 
   // General & persistence state
   const [loaded, setLoaded] = useState(false);
@@ -298,15 +303,18 @@ export default function PaintingCostCalculator() {
               if (parsedPlans && typeof parsedPlans === 'object') {
                 setPlans((prev) => {
                   const updated = { ...prev };
-                  for (const key of ['essential', 'professional', 'enterprise', 'signature']) {
-                    if (parsedPlans[key]) {
+                  for (const [key, pData] of Object.entries(parsedPlans)) {
+                    if (pData && typeof pData === 'object') {
+                      const base = prev[key] || createDefaultCustomPlan(key, pData.name || 'Custom Plan');
                       updated[key] = {
-                        ...prev[key],
-                        ...parsedPlans[key],
-                        curator: { ...prev[key]?.curator, ...(parsedPlans[key]?.curator || {}) },
-                        installation: { ...prev[key]?.installation, ...(parsedPlans[key]?.installation || {}) },
-                        logistics: { ...prev[key]?.logistics, ...(parsedPlans[key]?.logistics || {}) },
-                        projectTravel: { ...prev[key]?.projectTravel, ...(parsedPlans[key]?.projectTravel || {}) },
+                        ...base,
+                        ...pData,
+                        curator: { ...base.curator, ...(pData.curator || {}) },
+                        installation: { ...base.installation, ...(pData.installation || {}) },
+                        rotation: { ...(base.rotation || { feePerCycle: 1500, cycles: 1 }), ...(pData.rotation || {}) },
+                        logistics: { ...base.logistics, ...(pData.logistics || {}) },
+                        packaging: { ...(base.packaging || { feePerCycle: 600, cycles: 1 }), ...(pData.packaging || {}) },
+                        projectTravel: { ...base.projectTravel, ...(pData.projectTravel || {}) },
                       };
                     }
                   }
@@ -315,6 +323,19 @@ export default function PaintingCostCalculator() {
               }
             } catch (e) {
               console.warn('Failed to parse plans:', e);
+            }
+          }
+
+          // Load company sustainability portfolio mix
+          const localPortfolio = window.localStorage.getItem(STORAGE_KEY_PORTFOLIO);
+          if (localPortfolio) {
+            try {
+              const parsedPort = JSON.parse(localPortfolio);
+              if (parsedPort && typeof parsedPort === 'object') {
+                setPortfolioClients((prev) => ({ ...prev, ...parsedPort }));
+              }
+            } catch (e) {
+              console.warn('Failed to parse portfolio mix:', e);
             }
           }
 
@@ -376,10 +397,11 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(subscriptionState));
       window.localStorage.setItem(STORAGE_KEY_COMPANY_COSTS, JSON.stringify(companyCosts));
       window.localStorage.setItem(STORAGE_KEY_PLANS, JSON.stringify(plans));
+      window.localStorage.setItem(STORAGE_KEY_PORTFOLIO, JSON.stringify(portfolioClients));
     } catch (e) {
       console.warn('LocalStorage write error:', e);
     }
-  }, [settings, pricing, paintings, curationContext, subscriptionState, companyCosts, plans, loaded]);
+  }, [settings, pricing, paintings, curationContext, subscriptionState, companyCosts, plans, portfolioClients, loaded]);
 
   // Robust tab navigation: ALWAYS closes Settings drawer when switching sections
   const handleNavigateTab = (tab) => {
@@ -484,16 +506,22 @@ export default function PaintingCostCalculator() {
     });
   }, [curatedSummary.totalProductionCost, subscriptionState]);
 
-  // 5. Multi-Plan Economics Engine (Essential, Professional, Enterprise, Signature)
+  // 5. Multi-Plan Economics Engine (Independent model for every plan, including custom plans)
   const plansEconomics = useMemo(() => {
     const available = batchSummary.calculatedPaintings || [];
-    return {
-      essential: calculatePlanEconomics(plans.essential, companyCosts, curatedSummary, settings, available),
-      professional: calculatePlanEconomics(plans.professional, companyCosts, curatedSummary, settings, available),
-      enterprise: calculatePlanEconomics(plans.enterprise, companyCosts, curatedSummary, settings, available),
-      signature: calculatePlanEconomics(plans.signature, companyCosts, curatedSummary, settings, available),
-    };
+    const econ = {};
+    for (const [planId, planData] of Object.entries(plans || {})) {
+      if (planData) {
+        econ[planId] = calculatePlanEconomics(planData, companyCosts, curatedSummary, settings, available);
+      }
+    }
+    return econ;
   }, [plans, companyCosts, curatedSummary, settings, batchSummary.calculatedPaintings]);
+
+  // Company Sustainability & Portfolio Mix across active clients
+  const portfolioSustainability = useMemo(() => {
+    return calculatePortfolioSustainability(plans, portfolioClients, companyCosts, plansEconomics);
+  }, [plans, portfolioClients, companyCosts, plansEconomics]);
 
   const symbol = settings.currencySymbol || '₹';
   const decimals = num(settings.decimals, 0);
@@ -591,6 +619,46 @@ export default function PaintingCostCalculator() {
         },
       };
     });
+  };
+
+  const handleAddCustomPlan = (name = 'Custom Plan') => {
+    const id = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+    const newPlan = createDefaultCustomPlan(id, name);
+    setPlans((prev) => ({
+      ...prev,
+      [id]: newPlan,
+    }));
+    setPortfolioClients((prev) => ({
+      ...prev,
+      [id]: 1,
+    }));
+    setActivePlanId(id);
+    return id;
+  };
+
+  const handleDeleteCustomPlan = (planId) => {
+    // Only delete custom plans, not the core four
+    if (['essential', 'professional', 'enterprise', 'signature'].includes(planId)) return;
+    setPlans((prev) => {
+      const copy = { ...prev };
+      delete copy[planId];
+      return copy;
+    });
+    setPortfolioClients((prev) => {
+      const copy = { ...prev };
+      delete copy[planId];
+      return copy;
+    });
+    if (activePlanId === planId) {
+      setActivePlanId('professional');
+    }
+  };
+
+  const handleUpdatePortfolioClientCount = (planId, count) => {
+    setPortfolioClients((prev) => ({
+      ...prev,
+      [planId]: Math.max(0, parseInt(count, 10) || 0),
+    }));
   };
 
   const handleUpdateCompanyCosts = (field, value) => {
@@ -1451,6 +1519,11 @@ export default function PaintingCostCalculator() {
             onClearPlanPaintings={handleClearPlanPaintings}
             onResetPlanToCurated={handleResetPlanToCurated}
             plansEconomics={plansEconomics}
+            portfolioClients={portfolioClients}
+            onUpdatePortfolioClientCount={handleUpdatePortfolioClientCount}
+            portfolioSustainability={portfolioSustainability}
+            onAddCustomPlan={handleAddCustomPlan}
+            onDeleteCustomPlan={handleDeleteCustomPlan}
             subscriptionState={subscriptionState}
             onUpdateSubscription={handleUpdateSubscription}
             onUpdateOperatingCost={handleUpdateOperatingCost}
