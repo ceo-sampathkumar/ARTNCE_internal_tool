@@ -2099,8 +2099,8 @@ export default function SubscriptionView({
               <table className="w-full text-left" style={{ minWidth: 960 }}>
                 <thead>
                   <tr className="text-xs uppercase tracking-wider" style={{ borderBottom: `1px solid ${C.rule}`, color: C.inkMuted }}>
-                    <th className="py-3 px-4 font-medium">Duration</th>
-                    <th className="py-3 px-3 font-medium text-right">Monthly Revenue</th>
+                    <th className="py-3 px-4 font-medium">Monthly Revenue</th>
+                    <th className="py-3 px-3 font-medium">Duration</th>
                     <th className="py-3 px-3 font-medium text-right">Client Pays</th>
                     <th className="py-3 px-1 text-center font-mono font-semibold text-stone-400 text-sm select-none" style={{ width: '28px' }}>−</th>
                     <th className="py-3 px-3 font-medium text-right">Delivery Cost</th>
@@ -2120,11 +2120,11 @@ export default function SubscriptionView({
                       className="text-sm transition-colors hover:bg-stone-50/60"
                       style={{ borderBottom: `1px solid ${C.rule}` }}
                     >
-                      <td className="py-3.5 px-4 font-medium" style={{ color: C.ink }}>
-                        {sc.months} months
-                      </td>
-                      <td className="py-3.5 px-3 text-right tabular font-mono text-xs" style={{ color: C.inkMuted }}>
+                      <td className="py-3.5 px-4 tabular font-mono font-medium text-sm" style={{ color: C.ink }}>
                         {money(sc.monthlyRevenue)}
+                      </td>
+                      <td className="py-3.5 px-3 font-medium text-sm" style={{ color: C.inkMuted }}>
+                        {sc.months} months
                       </td>
                       <td className="py-3.5 px-3 text-right tabular font-mono font-medium" style={{ color: C.ink }}>
                         {money(sc.totalRevenue)}
