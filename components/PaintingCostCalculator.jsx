@@ -37,6 +37,8 @@ import {
   calculatePlanEconomics,
   calculatePortfolioSustainability,
   calculateCompanyPerformance,
+  findMatchingArtworkPrice,
+  calculateCuratedArtworksPricing,
 } from '@/lib/calculator';
 import {
   DEFAULT_SETTINGS,
@@ -65,6 +67,12 @@ import {
   STORAGE_KEY_ARTIST,
   STORAGE_KEY_CURATOR_PRICING,
   STORAGE_KEY_COMPANY_PERFORMANCE,
+  STORAGE_KEY_CURATED_CLIENTS,
+  DEFAULT_CURATED_CLIENTS,
+  STORAGE_KEY_ACTIVE_CLIENTS,
+  DEFAULT_ACTIVE_CLIENTS,
+  STORAGE_KEY_ARTWORK_PRICING,
+  DEFAULT_ARTWORK_PRICING,
   createEmptyPainting,
   createDefaultBatch,
   makeId,
@@ -220,6 +228,45 @@ export default function PaintingCostCalculator() {
 
   // Curation state (Stage 03 CURATE)
   const [curationContext, setCurationContext] = useState(DEFAULT_CURATION_CONTEXT);
+
+  // Curated Clients (Single source of truth from 03 CURATE)
+  const [curatedClients, setCuratedClients] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY_CURATED_CLIENTS);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse curated clients:', e);
+      }
+    }
+    return DEFAULT_CURATED_CLIENTS;
+  });
+
+  // Active Subscription Clients & Plans (Assigned subscriptions from 04 SUBSCRIPTION)
+  const [activeClients, setActiveClients] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY_ACTIVE_CLIENTS);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse active clients:', e);
+      }
+    }
+    return DEFAULT_ACTIVE_CLIENTS;
+  });
+
+  // Global Size-Based Artwork Pricing State (PRICE SETTINGS → ARTWORK PRICING)
+  const [artworkPricing, setArtworkPricing] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY_ARTWORK_PRICING);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse artwork pricing from storage:', e);
+      }
+    }
+    return DEFAULT_ARTWORK_PRICING;
+  });
 
   // Subscription model state (Stage 04 SUBSCRIPTION)
   const [subscriptionState, setSubscriptionState] = useState(DEFAULT_SUBSCRIPTION);
@@ -397,6 +444,55 @@ export default function PaintingCostCalculator() {
               console.warn('Failed to parse company performance:', e);
             }
           }
+
+          // Load curated clients
+          const localCurated = window.localStorage.getItem(STORAGE_KEY_CURATED_CLIENTS);
+          if (localCurated) {
+            try {
+              const parsedCurated = JSON.parse(localCurated);
+              if (Array.isArray(parsedCurated) && parsedCurated.length > 0) {
+                setCuratedClients(parsedCurated);
+              }
+            } catch (e) {
+              console.warn('Failed to parse curated clients from storage:', e);
+            }
+          }
+
+          // Load active subscription clients
+          const localActiveClients = window.localStorage.getItem(STORAGE_KEY_ACTIVE_CLIENTS);
+          if (localActiveClients) {
+            try {
+              const parsedActive = JSON.parse(localActiveClients);
+              if (Array.isArray(parsedActive)) {
+                setActiveClients(parsedActive);
+              }
+            } catch (e) {
+              console.warn('Failed to parse active clients from storage:', e);
+            }
+          }
+
+          // Load artwork pricing
+          const localArtworkPricing = window.localStorage.getItem(STORAGE_KEY_ARTWORK_PRICING);
+          if (localArtworkPricing) {
+            try {
+              const parsedArtworkPricing = JSON.parse(localArtworkPricing);
+              if (parsedArtworkPricing && typeof parsedArtworkPricing === 'object') {
+                setArtworkPricing((prev) => ({
+                  ...prev,
+                  ...parsedArtworkPricing,
+                  sizes: Array.isArray(parsedArtworkPricing.sizes) && parsedArtworkPricing.sizes.length > 0
+                    ? parsedArtworkPricing.sizes
+                    : prev.sizes,
+                  customSize: {
+                    ...prev.customSize,
+                    ...(parsedArtworkPricing.customSize || {}),
+                  },
+                }));
+              }
+            } catch (e) {
+              console.warn('Failed to parse artwork pricing:', e);
+            }
+          }
         }
       } catch (err) {
         console.warn('LocalStorage read error:', err);
@@ -447,6 +543,8 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings, pricing }));
       window.localStorage.setItem(STORAGE_KEY_BATCH, JSON.stringify(paintings));
       window.localStorage.setItem(STORAGE_KEY_CURATION, JSON.stringify(curationContext));
+      window.localStorage.setItem(STORAGE_KEY_CURATED_CLIENTS, JSON.stringify(curatedClients));
+      window.localStorage.setItem(STORAGE_KEY_ACTIVE_CLIENTS, JSON.stringify(activeClients));
       window.localStorage.setItem(STORAGE_KEY_SUBSCRIPTION, JSON.stringify(subscriptionState));
       window.localStorage.setItem(STORAGE_KEY_COMPANY_COSTS, JSON.stringify(companyCosts));
       window.localStorage.setItem(STORAGE_KEY_PLANS, JSON.stringify(plans));
@@ -454,6 +552,7 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY_WORK_TYPE, workType);
       window.localStorage.setItem(STORAGE_KEY_ARTIST, JSON.stringify(artistContext));
       window.localStorage.setItem(STORAGE_KEY_CURATOR_PRICING, JSON.stringify(curatorPricing));
+      window.localStorage.setItem(STORAGE_KEY_ARTWORK_PRICING, JSON.stringify(artworkPricing));
       window.localStorage.setItem(
         STORAGE_KEY_COMPANY_PERFORMANCE,
         JSON.stringify({ expectedMonthlyRevenue })
@@ -466,6 +565,8 @@ export default function PaintingCostCalculator() {
     pricing,
     paintings,
     curationContext,
+    curatedClients,
+    activeClients,
     subscriptionState,
     companyCosts,
     plans,
@@ -473,6 +574,7 @@ export default function PaintingCostCalculator() {
     workType,
     artistContext,
     curatorPricing,
+    artworkPricing,
     expectedMonthlyRevenue,
     loaded,
   ]);
@@ -518,6 +620,7 @@ export default function PaintingCostCalculator() {
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS);
     setPricing(DEFAULT_PRICING);
+    setArtworkPricing(DEFAULT_ARTWORK_PRICING);
   };
 
   // Cloud sync settings to DB
@@ -846,6 +949,87 @@ export default function PaintingCostCalculator() {
 
   const handleDeselectAll = () => {
     setCurationContext((prev) => ({ ...prev, selectedPaintingIds: [] }));
+  };
+
+  const handleSaveCuratedClient = (clientData) => {
+    let resolvedClientId = clientData.id;
+    setCuratedClients((prev) => {
+      const idx = prev.findIndex(
+        (c) =>
+          (clientData.id && c.id === clientData.id) ||
+          c.clientName.trim().toLowerCase() === clientData.clientName.trim().toLowerCase()
+      );
+      if (idx >= 0) {
+        resolvedClientId = prev[idx].id;
+        const updated = [...prev];
+        updated[idx] = {
+          ...prev[idx],
+          ...clientData,
+          id: prev[idx].id,
+        };
+        return updated;
+      }
+      const newClient = {
+        id: clientData.id || `cur_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        ...clientData,
+      };
+      resolvedClientId = newClient.id;
+      return [newClient, ...prev];
+    });
+
+    // Synchronize active subscription record so CURATE changes immediately update subscriptions
+    setActiveClients((prev) =>
+      prev.map((sub) => {
+        const isMatch =
+          (resolvedClientId && sub.clientId === resolvedClientId) ||
+          (clientData.id && sub.clientId === clientData.id) ||
+          sub.clientName?.trim().toLowerCase() === clientData.clientName.trim().toLowerCase();
+        if (isMatch) {
+          return {
+            ...sub,
+            clientId: resolvedClientId || sub.clientId,
+            clientName: clientData.clientName,
+            collectionName: clientData.collectionName || sub.collectionName,
+            location: clientData.location || sub.location,
+            spaceSqFt: clientData.spaceSqFt !== undefined ? Number(clientData.spaceSqFt) : sub.spaceSqFt,
+            artworkCount: clientData.artworkCount !== undefined ? Number(clientData.artworkCount) : sub.artworkCount,
+            totalArtworkInvestment: clientData.totalArtworkInvestment || sub.totalArtworkInvestment,
+            baseArtworkValue: clientData.baseArtworkValue || sub.baseArtworkValue,
+            commissionValue: clientData.commissionValue || sub.commissionValue,
+          };
+        }
+        return sub;
+      })
+    );
+
+    setCurationContext((prev) => ({
+      ...prev,
+      id: resolvedClientId || clientData.id || prev.id,
+      clientName: clientData.clientName,
+      collectionName: clientData.collectionName,
+      location: clientData.location,
+      spaceSqFt: clientData.spaceSqFt,
+      artworkCount: clientData.artworkCount,
+    }));
+  };
+
+  const handleSelectCuratedClient = (client) => {
+    setCurationContext((prev) => ({
+      ...prev,
+      id: client.id,
+      clientName: client.clientName || '',
+      collectionName: client.collectionName || 'Proposed Client Collection',
+      location: client.location || '',
+      spaceSqFt: client.spaceSqFt || '',
+      artworkCount: client.artworkCount || '',
+      selectedPaintingIds: client.selectedPaintingIds || prev.selectedPaintingIds || [],
+      curatorProjectFee: client.curatorProjectFee || prev.curatorProjectFee || 2000,
+      notes: client.notes || '',
+    }));
+  };
+
+  const handleDeleteCuratedClient = (id) => {
+    setCuratedClients((prev) => prev.filter((c) => c.id !== id));
   };
 
   /* -----------------------------------------------------------------------
@@ -1225,7 +1409,7 @@ export default function PaintingCostCalculator() {
             >
               <div>
                 <span className="font-mono text-[10px] block opacity-70">04 SUBSCRIPTION</span>
-                <span className="font-medium text-sm">Lease Economics</span>
+                <span className="font-medium text-sm">Plan &amp; Clients</span>
               </div>
             </button>
 
@@ -1243,7 +1427,7 @@ export default function PaintingCostCalculator() {
             >
               <div>
                 <span className="font-mono text-[10px] block opacity-70">05 PERFORMANCE</span>
-                <span className="font-medium text-sm">Company &amp; Sustainability</span>
+                <span className="font-medium text-sm">Company Performance</span>
               </div>
             </button>
           </div>
@@ -1569,6 +1753,193 @@ export default function PaintingCostCalculator() {
               )}
             </div>
 
+            {/* ---------------------------------------------------------------
+             * PRICE SETTINGS → ARTWORK PRICING (Size-Based Pricing & Commission)
+             * -------------------------------------------------------------*/}
+            <div className="mt-6 pt-5 border-t" style={{ borderColor: C.rule }}>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold" style={{ backgroundColor: C.ink, color: C.paper }}>
+                      PRICE SETTINGS → ARTWORK PRICING
+                    </span>
+                    <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: C.ink }}>
+                      Size-Based Artwork Pricing &amp; Commission
+                    </h3>
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: C.inkMuted }}>
+                    Artwork pricing must be size-based. Each artwork is calculated individually: <strong>Base Price + Commission = Final Plan Price</strong>. Total Artwork Investment is the exact sum of all individual artworks (never averaged).
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextId = `sz_custom_${Date.now().toString(36)}`;
+                    setArtworkPricing((prev) => ({
+                      ...prev,
+                      sizes: [
+                        ...prev.sizes,
+                        { id: nextId, width: 20, height: 28, unit: 'in', label: '20 × 28', basePrice: 4800, commissionPercent: prev.globalCommissionPercent || 20 },
+                      ],
+                    }));
+                  }}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded border bg-white hover:bg-stone-50 transition-colors"
+                  style={{ borderColor: C.rule, color: C.ink }}
+                >
+                  <Plus size={13} /> Add Size Tier
+                </button>
+              </div>
+
+              {/* Standard Sizes Table */}
+              <div className="overflow-x-auto border rounded bg-white mt-3" style={{ borderColor: C.rule }}>
+                <table className="w-full text-left text-xs font-mono">
+                  <thead>
+                    <tr className="bg-gray-50 border-b text-gray-600" style={{ borderColor: C.rule }}>
+                      <th className="py-2.5 px-3">Artwork Size</th>
+                      <th className="py-2.5 px-3 text-right">Base Price ({symbol})</th>
+                      <th className="py-2.5 px-3 text-right">Commission %</th>
+                      <th className="py-2.5 px-3 text-right">Commission ({symbol})</th>
+                      <th className="py-2.5 px-3 text-right font-bold text-gray-900">Final Plan Price ({symbol})</th>
+                      <th className="py-2.5 px-2 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: C.rule }}>
+                    {(artworkPricing.sizes || []).map((s, idx) => {
+                      const base = num(s.basePrice, 0);
+                      const commPct = num(s.commissionPercent, 20);
+                      const commVal = Math.round(base * (commPct / 100));
+                      const finalVal = base + commVal;
+
+                      return (
+                        <tr key={s.id || idx} className="hover:bg-stone-50">
+                          <td className="py-2 px-3">
+                            <span className="font-bold text-gray-900 text-xs sm:text-sm">{s.label || `${s.width} × ${s.height}`}</span>
+                            <span className="text-[10px] text-gray-500 ml-1">({s.unit || 'in'})</span>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <div className="inline-flex items-center justify-end">
+                              <span className="text-gray-400 mr-0.5">{symbol}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={s.basePrice ?? ''}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setArtworkPricing((prev) => ({
+                                    ...prev,
+                                    sizes: prev.sizes.map((item, i) =>
+                                      i === idx ? { ...item, basePrice: val } : item
+                                    ),
+                                  }));
+                                }}
+                                className="w-24 text-right border-b py-0.5 outline-none font-bold"
+                                style={{ borderColor: C.rule }}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <div className="inline-flex items-center justify-end">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={s.commissionPercent ?? ''}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                                  setArtworkPricing((prev) => ({
+                                    ...prev,
+                                    sizes: prev.sizes.map((item, i) =>
+                                      i === idx ? { ...item, commissionPercent: val } : item
+                                    ),
+                                  }));
+                                }}
+                                className="w-14 text-right border-b py-0.5 outline-none font-bold"
+                                style={{ borderColor: C.rule }}
+                              />
+                              <span className="text-gray-500 ml-1">%</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-right font-medium text-amber-900">
+                            +{money(commVal)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-bold text-emerald-800 text-xs sm:text-sm">
+                            {money(finalVal)}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            {idx >= 6 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setArtworkPricing((prev) => ({
+                                    ...prev,
+                                    sizes: prev.sizes.filter((_, i) => i !== idx),
+                                  }));
+                                }}
+                                className="text-gray-400 hover:text-red-600"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Custom Size Configuration Card */}
+              <div className="mt-3 p-3.5 rounded border bg-amber-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono" style={{ borderColor: C.rule }}>
+                <div>
+                  <strong className="text-gray-900 block font-sans">Custom / Non-Standard Artwork Size Calculation:</strong>
+                  <span className="text-gray-600 font-sans text-[11px]">
+                    If an artwork dimension does not match standard sizes, Base Price = Area (sq ft) × Rate per sq ft, plus Commission %.
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-1.5">
+                    <span className="text-gray-600">Base Rate:</span>
+                    <span className="text-gray-400">{symbol}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={artworkPricing.customSize?.ratePerSqFt ?? 1100}
+                      onChange={(e) => {
+                        const val = Math.max(0, Number(e.target.value) || 0);
+                        setArtworkPricing((prev) => ({
+                          ...prev,
+                          customSize: { ...prev.customSize, ratePerSqFt: val },
+                        }));
+                      }}
+                      className="w-20 text-right border-b py-0.5 outline-none font-bold bg-transparent"
+                      style={{ borderColor: C.rule }}
+                    />
+                    <span className="text-gray-500">/ sq ft</span>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <span className="text-gray-600">Commission:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={artworkPricing.customSize?.commissionPercent ?? 20}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                        setArtworkPricing((prev) => ({
+                          ...prev,
+                          customSize: { ...prev.customSize, commissionPercent: val },
+                        }));
+                      }}
+                      className="w-14 text-right border-b py-0.5 outline-none font-bold bg-transparent"
+                      style={{ borderColor: C.rule }}
+                    />
+                    <span className="text-gray-500">%</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <div className="pt-6 mt-4 border-t flex items-center justify-between flex-wrap gap-4" style={{ borderColor: C.rule }}>
               <div className="text-xs" style={{ color: C.inkMuted }}>
                 Rates are saved locally. {dbConnected ? 'Database cloud sync active.' : ''}
@@ -1881,9 +2252,7 @@ export default function PaintingCostCalculator() {
           />
         )}
 
-        {/* -------------------------------------------------------------------
-         * STAGE 03: CURATE (Client Collection Selection)
-         * -----------------------------------------------------------------*/}
+        {/* STAGE 03: CURATE (Client Collection Selection) */}
         {activeTab === 'curate' && (
           <CurateView
             paintings={batchSummary.calculatedPaintings}
@@ -1895,67 +2264,48 @@ export default function PaintingCostCalculator() {
             onSelectAll={handleSelectAllValid}
             onDeselectAll={handleDeselectAll}
             settings={settings}
+            artworkPricing={artworkPricing}
+            onUpdateArtworkPricing={setArtworkPricing}
+            curatedClients={curatedClients}
+            onSaveCuratedClient={handleSaveCuratedClient}
+            onSelectCuratedClient={handleSelectCuratedClient}
+            onDeleteCuratedClient={handleDeleteCuratedClient}
             onNavigateToSubscription={() => handleNavigateTab('subscription')}
             onNavigateToBatch={() => handleNavigateTab('batch')}
           />
         )}
 
-        {/* -------------------------------------------------------------------
-         * STAGE 04: SUBSCRIPTION (Lease Economics & Recovery Scenarios)
-         * -----------------------------------------------------------------*/}
+        {/* STAGE 04: SUBSCRIPTION (Screen 1: Plan & Client Calculator) */}
         {activeTab === 'subscription' && (
           <SubscriptionView
-            curatedSummary={curatedSummary}
-            curationContext={curationContext}
-            availablePaintings={batchSummary.calculatedPaintings}
-            companyCosts={companyCosts}
-            onUpdateCompanyCosts={handleUpdateCompanyCosts}
-            onUpdateEmployee={handleUpdateEmployee}
-            onAddEmployee={handleAddEmployee}
-            onRemoveEmployee={handleRemoveEmployee}
-            onUpdateBikeReimbursement={handleUpdateBikeReimbursement}
-            plans={plans}
-            activePlanId={activePlanId}
-            onChangeActivePlanId={setActivePlanId}
-            onUpdatePlan={handleUpdatePlan}
-            onUpdatePlanNested={handleUpdatePlanNested}
-            onTogglePlanPainting={handleTogglePlanPainting}
-            onSelectAllPlanPaintings={handleSelectAllPlanPaintings}
-            onClearPlanPaintings={handleClearPlanPaintings}
-            onResetPlanToCurated={handleResetPlanToCurated}
-            plansEconomics={plansEconomics}
-            portfolioClients={portfolioClients}
-            onUpdatePortfolioClientCount={handleUpdatePortfolioClientCount}
-            portfolioSustainability={portfolioSustainability}
-            onAddCustomPlan={handleAddCustomPlan}
-            onDeleteCustomPlan={handleDeleteCustomPlan}
-            subscriptionState={subscriptionState}
-            onUpdateSubscription={handleUpdateSubscription}
-            onUpdateOperatingCost={handleUpdateOperatingCost}
-            subscriptionEconomics={subscriptionEconomics}
             settings={settings}
-            onSaveSnapshot={saveSnapshot}
+            artworkPricing={artworkPricing}
+            onUpdateArtworkPricing={setArtworkPricing}
+            screen="calculator"
+            curatedClients={curatedClients}
+            onSaveCuratedClient={handleSaveCuratedClient}
+            activeClients={activeClients}
+            onUpdateActiveClients={setActiveClients}
+            currentCurateClientName={curationContext.clientName}
             onNavigateToCurate={() => handleNavigateTab('curate')}
             onNavigateToBatch={() => handleNavigateTab('batch')}
-            onNavigateToPerformance={() => handleNavigateTab('performance')}
           />
         )}
 
-        {/* -------------------------------------------------------------------
-         * STAGE 05: PERFORMANCE (Company Sustainability & Executive Modeling)
-         * -----------------------------------------------------------------*/}
+        {/* STAGE 05: PERFORMANCE (Screen 2: Company Performance & Target) */}
         {activeTab === 'performance' && (
-          <CompanyPerformanceView
-            plans={plans}
-            plansEconomics={plansEconomics}
-            portfolioClients={portfolioClients}
-            onUpdatePortfolioClientCount={handleUpdatePortfolioClientCount}
-            companyCosts={companyCosts}
-            expectedMonthlyRevenue={expectedMonthlyRevenue}
-            onUpdateExpectedMonthlyRevenue={setExpectedMonthlyRevenue}
+          <SubscriptionView
             settings={settings}
-            onAddCustomPlan={handleAddCustomPlan}
-            onNavigateToSubscription={() => handleNavigateTab('subscription')}
+            artworkPricing={artworkPricing}
+            onUpdateArtworkPricing={setArtworkPricing}
+            screen="performance"
+            curatedClients={curatedClients}
+            onSaveCuratedClient={handleSaveCuratedClient}
+            activeClients={activeClients}
+            onUpdateActiveClients={setActiveClients}
+            currentCurateClientName={curationContext.clientName}
+            onNavigateToCurate={() => handleNavigateTab('curate')}
+            onNavigateToBatch={() => handleNavigateTab('batch')}
           />
         )}
       </div>

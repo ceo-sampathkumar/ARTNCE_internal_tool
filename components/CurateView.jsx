@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckSquare,
   Square,
@@ -10,6 +10,10 @@ import {
   Building,
   FolderPlus,
   FileText,
+  Save,
+  CheckCircle2,
+  Users,
+  Tag,
 } from 'lucide-react';
 import {
   DESIGN_TOKENS as C,
@@ -18,10 +22,12 @@ import {
   FONT_MONO,
   fmtNum,
   fmtCurrency,
+  findMatchingArtworkPrice,
+  calculateCuratedArtworksPricing,
 } from '@/lib/calculator';
 
 export default function CurateView({
-  paintings,
+  paintings = [],
   curationContext,
   onUpdateContext,
   curatedSummary,
@@ -29,16 +35,90 @@ export default function CurateView({
   onToggleSelectPainting,
   onSelectAll,
   onDeselectAll,
-  settings,
+  settings = {},
+  artworkPricing,
+  curatedClients = [],
+  onSaveCuratedClient,
+  onSelectCuratedClient,
+  onDeleteCuratedClient,
   onNavigateToSubscription,
   onNavigateToBatch,
 }) {
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const symbol = settings.currencySymbol || '₹';
   const decimals = settings.decimals || 0;
   const money = (v) => fmtCurrency(v, symbol, decimals);
 
   const totalAvailable = paintings.length;
-  const validAvailable = paintings.filter((p) => p.cost.isValid).length;
+  const validAvailable = paintings.filter((p) => p.cost?.isValid).length;
+
+  // Selected artworks from inventory
+  const curatedArtworksList = useMemo(() => {
+    const selectedSet = new Set(curationContext.selectedPaintingIds || []);
+    return (paintings || []).filter((p) => selectedSet.has(p.id) && p.cost?.isValid);
+  }, [paintings, curationContext.selectedPaintingIds]);
+
+  // Size-Based Artwork Pricing Calculation (Individual evaluation, summed up)
+  const sizePricingSummary = useMemo(() => {
+    return calculateCuratedArtworksPricing(curatedArtworksList, artworkPricing);
+  }, [curatedArtworksList, artworkPricing]);
+
+  const effectiveArtworkInvestment =
+    sizePricingSummary.totalArtworkInvestment > 0
+      ? sizePricingSummary.totalArtworkInvestment
+      : curatedSummary?.totalProductionCost || 0;
+
+  const handleSaveCollection = (silentIfEmpty = false) => {
+    if (!curationContext.clientName?.trim()) {
+      if (!silentIfEmpty) {
+        alert('Please enter a Client Name before saving.');
+      }
+      return false;
+    }
+    const clientData = {
+      id: curationContext.id || undefined,
+      clientName: curationContext.clientName.trim(),
+      collectionName: curationContext.collectionName?.trim() || 'Client Collection',
+      location: curationContext.location?.trim() || '',
+      spaceSqFt: Number(curationContext.spaceSqFt) || 2000,
+      artworkCount: Number(curationContext.artworkCount) || selectedCount || (sizePricingSummary.count || 3),
+      selectedPaintingIds: curationContext.selectedPaintingIds || [],
+      // Size-based pricing details
+      totalArtworkInvestment: effectiveArtworkInvestment,
+      baseArtworkValue: sizePricingSummary.totalBasePrice,
+      commissionValue: sizePricingSummary.totalCommission,
+      artworksPricing: sizePricingSummary.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        width: item.width,
+        height: item.height,
+        unit: item.unit,
+        sizeLabel: item.sizePricing?.sizeLabel,
+        basePrice: item.sizePricing?.basePrice,
+        commissionPercent: item.sizePricing?.commissionPercent,
+        commissionAmount: item.sizePricing?.commissionAmount,
+        finalPrice: item.sizePricing?.finalPrice,
+      })),
+      totalProductionCost: effectiveArtworkInvestment,
+      notes: curationContext.notes || '',
+      curatorProjectFee: Number(curationContext.curatorProjectFee) || 2000,
+    };
+    if (onSaveCuratedClient) {
+      onSaveCuratedClient(clientData);
+    }
+    setSaveSuccessMsg(`Client "${clientData.clientName}" saved with size-based artwork pricing! Available in 04 SUBSCRIPTION.`);
+    setTimeout(() => setSaveSuccessMsg(''), 4000);
+    return true;
+  };
+
+  const handleNavigateToSub = () => {
+    if (curationContext.clientName?.trim()) {
+      handleSaveCollection(true);
+    }
+    if (onNavigateToSubscription) {
+      onNavigateToSubscription();
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -69,8 +149,8 @@ export default function CurateView({
           {selectedCount > 0 && (
             <button
               type="button"
-              onClick={onNavigateToSubscription}
-              className="flex items-center gap-1.5 text-xs px-4 py-2 font-medium"
+              onClick={handleNavigateToSub}
+              className="flex items-center gap-1.5 text-xs px-4 py-2 font-medium shadow-sm transition-all"
               style={{ backgroundColor: C.rust, color: '#fff' }}
             >
               Model Subscription Economics <ArrowRight size={13} />
@@ -78,7 +158,8 @@ export default function CurateView({
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+        {/* 5-Card Economics Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
           <div>
             <div className="text-xs" style={{ color: C.inkMuted }}>Selected Artworks</div>
             <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.ink }}>
@@ -92,68 +173,171 @@ export default function CurateView({
             </div>
           </div>
           <div>
-            <div className="text-xs" style={{ color: C.inkMuted }}>Total Artwork Investment</div>
-            <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.rust }}>
-              {money(curatedSummary.totalProductionCost)}
+            <div className="text-xs" style={{ color: C.inkMuted }}>Base Artwork Value</div>
+            <div className="tabular mt-1 text-2xl font-semibold font-mono" style={{ color: C.ink }}>
+              {money(sizePricingSummary.totalBasePrice)}
             </div>
+            <span className="text-[10px] text-gray-500">Size-based baseline</span>
           </div>
           <div>
-            <div className="text-xs" style={{ color: C.inkMuted }}>Avg Investment / Artwork</div>
-            <div className="tabular mt-1 text-2xl font-semibold" style={{ fontFamily: FONT_MONO, color: C.ink }}>
-              {money(curatedSummary.avgCostPerArtwork)}
+            <div className="text-xs" style={{ color: C.inkMuted }}>Commission</div>
+            <div className="tabular mt-1 text-2xl font-semibold font-mono text-amber-800">
+              +{money(sizePricingSummary.totalCommission)}
             </div>
+            <span className="text-[10px] text-gray-500">Configured margin</span>
+          </div>
+          <div className="col-span-2 sm:col-span-1 p-2.5 rounded bg-white/70 border" style={{ borderColor: C.rule }}>
+            <div className="text-xs font-bold uppercase tracking-wider" style={{ color: C.rust }}>
+              Total Artwork Investment
+            </div>
+            <div className="tabular mt-1 text-2xl font-bold" style={{ fontFamily: FONT_MONO, color: C.rust }}>
+              {money(effectiveArtworkInvestment)}
+            </div>
+            <span className="text-[10px] text-gray-600 block">
+              = Base + Commission
+            </span>
           </div>
         </div>
+
+        {/* Breakdown Rule Formula Notice */}
+        {sizePricingSummary.count > 0 && (
+          <div className="mt-4 pt-3 border-t flex items-center justify-between flex-wrap gap-2 text-xs font-mono" style={{ borderColor: C.rule, color: C.inkMuted }}>
+            <span>
+              Size-based investment: <strong>Base Artwork Value ({money(sizePricingSummary.totalBasePrice)})</strong> + <strong>Commission ({money(sizePricingSummary.totalCommission)})</strong> = <strong>Final Artwork Value ({money(sizePricingSummary.totalArtworkInvestment)})</strong>
+            </span>
+            <span className="text-[11px] text-stone-600">
+              Evaluated individually across {sizePricingSummary.count} artworks (never averaged)
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* Toast Feedback */}
+      {saveSuccessMsg && (
+        <div
+          className="p-3 rounded text-xs flex items-center gap-2 border bg-emerald-50 text-emerald-800"
+          style={{ borderColor: '#BBF7D0' }}
+        >
+          <CheckCircle2 size={16} className="text-emerald-600" />
+          <span className="font-medium">{saveSuccessMsg}</span>
+        </div>
+      )}
 
       {/* Curation Context Metadata Inputs */}
       <div className="p-6" style={{ border: `1px solid ${C.rule}`, backgroundColor: C.paper }}>
-        <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: '1.15rem', fontWeight: 600, color: C.ink }}>
-          Curation Context
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 mb-4 border-b gap-3" style={{ borderColor: C.rule }}>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] tracking-wider uppercase font-mono px-2 py-0.5 rounded" style={{ backgroundColor: C.paperDark, color: C.inkMuted }}>
+                03 CURATE
+              </span>
+              <span className="text-xs uppercase tracking-wider font-semibold" style={{ color: C.inkMuted }}>
+                Client Collection
+              </span>
+            </div>
+            <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: '1.25rem', fontWeight: 600, color: C.ink, marginTop: '2px' }}>
+              Curation Context &amp; Client Specification
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSaveCollection}
+            className="px-4 py-2 rounded text-xs font-semibold flex items-center gap-2 transition-all shadow hover:shadow-md self-start sm:self-auto"
+            style={{ backgroundColor: C.ink, color: C.paper }}
+          >
+            <Save size={14} />
+            <span>✓ Save Client Collection</span>
+          </button>
+        </div>
+
+        {/* Saved Curated Clients Selector */}
+        {curatedClients.length > 0 && (
+          <div className="mb-5 p-3 rounded border flex items-center justify-between gap-3 flex-wrap" style={{ backgroundColor: C.paperDark, borderColor: C.rule }}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: C.inkMuted }}>
+                <Users size={13} /> Saved Clients:
+              </span>
+              {curatedClients.map((c) => {
+                const isSelected = curationContext.clientName?.toLowerCase() === c.clientName?.toLowerCase();
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => onSelectCuratedClient && onSelectCuratedClient(c)}
+                    className="text-xs px-2.5 py-1 rounded transition-colors font-medium border"
+                    style={{
+                      backgroundColor: isSelected ? C.ink : '#FFFFFF',
+                      color: isSelected ? C.paper : C.ink,
+                      borderColor: C.rule,
+                    }}
+                  >
+                    {c.clientName} {c.collectionName ? `(${c.collectionName})` : ''}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUpdateContext('clientName', '');
+                onUpdateContext('collectionName', 'New Collection');
+                onUpdateContext('location', '');
+                onUpdateContext('spaceSqFt', '');
+                onUpdateContext('artworkCount', '');
+              }}
+              className="text-xs px-2.5 py-1 rounded border bg-white text-stone-700 hover:bg-stone-50"
+              style={{ borderColor: C.rule }}
+            >
+              + New Client
+            </button>
+          </div>
+        )}
+
         <p className="text-xs mt-1 mb-5" style={{ color: C.inkMuted }}>
-          Specify client, collection space, and location for internal proposal identification.
+          Specify client, collection space, and location for internal proposal identification. Saving here makes the client immediately available in <strong>04 SUBSCRIPTION</strong>.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <label className="block">
-            <span className="flex items-center gap-1.5 text-xs mb-1" style={{ color: C.inkMuted }}>
-              <Building size={12} /> Client Name
+            <span className="flex items-center gap-1.5 text-xs mb-1 font-medium" style={{ color: C.ink }}>
+              <Building size={12} /> Client Name *
             </span>
             <input
               type="text"
               value={curationContext.clientName}
               onChange={(e) => onUpdateContext('clientName', e.target.value)}
-              placeholder="e.g. Asian Monk Store"
-              className="w-full bg-transparent border-b py-1.5 text-sm outline-none"
+              placeholder="e.g. Asiapaints / Apex Towers"
+              className="w-full bg-white px-3 py-2 rounded text-sm outline-none border font-medium"
               style={{ borderColor: C.rule, color: C.ink, fontFamily: FONT_BODY }}
             />
           </label>
 
           <label className="block">
-            <span className="flex items-center gap-1.5 text-xs mb-1" style={{ color: C.inkMuted }}>
+            <span className="flex items-center gap-1.5 text-xs mb-1 font-medium" style={{ color: C.ink }}>
               <FolderPlus size={12} /> Collection Name
             </span>
             <input
               type="text"
               value={curationContext.collectionName}
               onChange={(e) => onUpdateContext('collectionName', e.target.value)}
-              placeholder="e.g. Reception + Lounge"
-              className="w-full bg-transparent border-b py-1.5 text-sm outline-none"
+              placeholder="e.g. Lounge / Executive Suite"
+              className="w-full bg-white px-3 py-2 rounded text-sm outline-none border"
               style={{ borderColor: C.rule, color: C.ink, fontFamily: FONT_BODY }}
             />
           </label>
 
           <label className="block">
-            <span className="flex items-center gap-1.5 text-xs mb-1" style={{ color: C.inkMuted }}>
+            <span className="flex items-center gap-1.5 text-xs mb-1 font-medium" style={{ color: C.ink }}>
               <MapPin size={12} /> Location / Space
             </span>
             <input
               type="text"
               value={curationContext.location}
               onChange={(e) => onUpdateContext('location', e.target.value)}
-              placeholder="e.g. Hyderabad"
-              className="w-full bg-transparent border-b py-1.5 text-sm outline-none"
+              placeholder="e.g. Hyderabad / Bengaluru"
+              className="w-full bg-white px-3 py-2 rounded text-sm outline-none border"
               style={{ borderColor: C.rule, color: C.ink, fontFamily: FONT_BODY }}
             />
           </label>
@@ -313,21 +497,23 @@ export default function CurateView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left" style={{ minWidth: 700 }}>
+            <table className="w-full text-left" style={{ minWidth: 780 }}>
               <thead>
                 <tr className="text-xs uppercase tracking-wider" style={{ borderBottom: `1px solid ${C.rule}`, color: C.inkMuted }}>
                   <th className="py-3 px-4 font-medium" style={{ width: '50px' }}>Select</th>
                   <th className="py-3 px-4 font-medium">Artwork</th>
                   <th className="py-3 px-4 font-medium">Artist / Category</th>
-                  <th className="py-3 px-4 font-medium">Size</th>
+                  <th className="py-3 px-4 font-medium">Dimensions</th>
                   <th className="py-3 px-4 font-medium text-right">Area</th>
+                  <th className="py-3 px-4 font-medium text-right">Size-Based Artwork Value</th>
                   <th className="py-3 px-4 font-medium text-right">Production Cost</th>
                 </tr>
               </thead>
               <tbody>
                 {paintings.map((p, index) => {
                   const isSelected = curationContext.selectedPaintingIds.includes(p.id);
-                  const isCalculated = p.cost.isValid;
+                  const isCalculated = p.cost?.isValid;
+                  const itemPricing = isCalculated ? findMatchingArtworkPrice(p, artworkPricing) : null;
 
                   return (
                     <tr
@@ -390,6 +576,20 @@ export default function CurateView({
                         {isCalculated ? `${fmtNum(p.cost.areaSqFt, 1)} sq ft` : '—'}
                       </td>
 
+                      {/* Size-Based Artwork Value (Base + Commission = Final) */}
+                      <td className="py-3 px-4 text-right tabular font-mono text-xs">
+                        {itemPricing ? (
+                          <div>
+                            <span className="font-bold text-gray-900">{money(itemPricing.finalPrice)}</span>
+                            <span className="text-[10px] text-gray-500 block">
+                              Base {money(itemPricing.basePrice)} + {itemPricing.commissionPercent}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+
                       {/* Production Cost */}
                       <td className="py-3 px-4 text-right tabular font-mono font-medium">
                         {isCalculated ? (
@@ -410,12 +610,12 @@ export default function CurateView({
 
         <div className="p-4 border-t flex items-center justify-between flex-wrap gap-4" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
           <div className="text-xs" style={{ color: C.inkMuted }}>
-            Selected: <strong className="text-stone-800">{selectedCount}</strong> artworks (Total Investment: <strong className="text-stone-800">{money(curatedSummary.totalProductionCost)}</strong>)
+            Selected: <strong className="text-stone-800">{selectedCount}</strong> artworks (Total Artwork Investment: <strong className="text-stone-900 font-mono">{money(effectiveArtworkInvestment)}</strong> | Base: <span className="font-mono">{money(sizePricingSummary.totalBasePrice)}</span> + Comm: <span className="font-mono">{money(sizePricingSummary.totalCommission)}</span>)
           </div>
           {selectedCount > 0 && (
             <button
               type="button"
-              onClick={onNavigateToSubscription}
+              onClick={handleNavigateToSub}
               className="flex items-center gap-1.5 text-xs px-4 py-2 font-medium"
               style={{ backgroundColor: C.rust, color: '#fff' }}
             >
