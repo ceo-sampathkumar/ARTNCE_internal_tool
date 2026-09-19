@@ -73,6 +73,10 @@ import {
   DEFAULT_ACTIVE_CLIENTS,
   STORAGE_KEY_ARTWORK_PRICING,
   DEFAULT_ARTWORK_PRICING,
+  STORAGE_KEY_COMPANY_EXPENSES,
+  DEFAULT_COMPANY_MONTHLY_EXPENSES,
+  STORAGE_KEY_SIMPLE_PLANS,
+  DEFAULT_SIMPLE_PLANS,
   createEmptyPainting,
   createDefaultBatch,
   makeId,
@@ -81,6 +85,7 @@ import BatchView from './BatchView';
 import CurateView from './CurateView';
 import SubscriptionView from './SubscriptionView';
 import CompanyPerformanceView from './CompanyPerformanceView';
+import StartupGrowthView from './StartupGrowthView';
 
 /* -----------------------------------------------------------------------
  * Reusable UI Building Blocks
@@ -234,7 +239,17 @@ export default function PaintingCostCalculator() {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY_CURATED_CLIENTS);
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map((c, idx) => ({
+              ...c,
+              id: (c.id && c.id !== 'undefined')
+                ? c.id
+                : `cur_${c.clientName ? c.clientName.toLowerCase().replace(/[^a-z0-9]/g, '') : 'client'}_${idx}`,
+            }));
+          }
+        }
       } catch (e) {
         console.warn('Failed to parse curated clients:', e);
       }
@@ -266,6 +281,40 @@ export default function PaintingCostCalculator() {
       }
     }
     return DEFAULT_ARTWORK_PRICING;
+  });
+
+  // Shared Simple Plans (Stage 04, 05, 06)
+  const [simplePlans, setSimplePlans] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY_SIMPLE_PLANS);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse simple plans:', e);
+      }
+    }
+    return DEFAULT_SIMPLE_PLANS;
+  });
+
+  // Shared Company Monthly Expenses (Stage 05, 06)
+  const [companyExpenses, setCompanyExpenses] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEY_COMPANY_EXPENSES);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            ...parsed,
+            technologyIsOneTime: parsed.technologyIsOneTime !== undefined
+              ? parsed.technologyIsOneTime
+              : (Number(parsed.technologySoftware) >= 50000),
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to parse company expenses:', e);
+      }
+    }
+    return DEFAULT_COMPANY_MONTHLY_EXPENSES;
   });
 
   // Subscription model state (Stage 04 SUBSCRIPTION)
@@ -553,6 +602,8 @@ export default function PaintingCostCalculator() {
       window.localStorage.setItem(STORAGE_KEY_ARTIST, JSON.stringify(artistContext));
       window.localStorage.setItem(STORAGE_KEY_CURATOR_PRICING, JSON.stringify(curatorPricing));
       window.localStorage.setItem(STORAGE_KEY_ARTWORK_PRICING, JSON.stringify(artworkPricing));
+      window.localStorage.setItem(STORAGE_KEY_SIMPLE_PLANS, JSON.stringify(simplePlans));
+      window.localStorage.setItem(STORAGE_KEY_COMPANY_EXPENSES, JSON.stringify(companyExpenses));
       window.localStorage.setItem(
         STORAGE_KEY_COMPANY_PERFORMANCE,
         JSON.stringify({ expectedMonthlyRevenue })
@@ -567,6 +618,8 @@ export default function PaintingCostCalculator() {
     curationContext,
     curatedClients,
     activeClients,
+    simplePlans,
+    companyExpenses,
     subscriptionState,
     companyCosts,
     plans,
@@ -969,11 +1022,14 @@ export default function PaintingCostCalculator() {
         };
         return updated;
       }
+      const newId = (clientData.id && clientData.id !== 'undefined')
+        ? clientData.id
+        : `cur_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
       const newClient = {
-        id: clientData.id || `cur_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         ...clientData,
+        id: newId,
       };
-      resolvedClientId = newClient.id;
+      resolvedClientId = newId;
       return [newClient, ...prev];
     });
 
@@ -1427,7 +1483,25 @@ export default function PaintingCostCalculator() {
             >
               <div>
                 <span className="font-mono text-[10px] block opacity-70">05 PERFORMANCE</span>
-                <span className="font-medium text-sm">Company Performance</span>
+                <span className="font-medium text-sm">Company Target</span>
+              </div>
+            </button>
+
+            <span className="text-stone-400 font-mono text-xs px-1">→</span>
+
+            {/* Step 06: STARTUP GROWTH */}
+            <button
+              type="button"
+              onClick={() => handleNavigateTab('startup-growth')}
+              className="flex-1 px-4 py-2 text-left rounded transition-colors text-xs flex items-center justify-between gap-3"
+              style={{
+                backgroundColor: activeTab === 'startup-growth' ? C.ink : 'transparent',
+                color: activeTab === 'startup-growth' ? C.paper : C.ink,
+              }}
+            >
+              <div>
+                <span className="font-mono text-[10px] block opacity-70">06 STARTUP GROWTH</span>
+                <span className="font-medium text-sm">Financial Simulator</span>
               </div>
             </button>
           </div>
@@ -2284,9 +2358,14 @@ export default function PaintingCostCalculator() {
             screen="calculator"
             curatedClients={curatedClients}
             onSaveCuratedClient={handleSaveCuratedClient}
+            onSelectCuratedClient={handleSelectCuratedClient}
             activeClients={activeClients}
             onUpdateActiveClients={setActiveClients}
             currentCurateClientName={curationContext.clientName}
+            plans={simplePlans}
+            onUpdatePlans={setSimplePlans}
+            companyExpenses={companyExpenses}
+            onUpdateCompanyExpenses={setCompanyExpenses}
             onNavigateToCurate={() => handleNavigateTab('curate')}
             onNavigateToBatch={() => handleNavigateTab('batch')}
           />
@@ -2301,11 +2380,29 @@ export default function PaintingCostCalculator() {
             screen="performance"
             curatedClients={curatedClients}
             onSaveCuratedClient={handleSaveCuratedClient}
+            onSelectCuratedClient={handleSelectCuratedClient}
             activeClients={activeClients}
             onUpdateActiveClients={setActiveClients}
             currentCurateClientName={curationContext.clientName}
+            plans={simplePlans}
+            onUpdatePlans={setSimplePlans}
+            companyExpenses={companyExpenses}
+            onUpdateCompanyExpenses={setCompanyExpenses}
             onNavigateToCurate={() => handleNavigateTab('curate')}
+            onNavigateToSubscription={() => handleNavigateTab('subscription')}
             onNavigateToBatch={() => handleNavigateTab('batch')}
+          />
+        )}
+
+        {/* STAGE 06: STARTUP GROWTH & FINANCIAL TARGET */}
+        {activeTab === 'startup-growth' && (
+          <StartupGrowthView
+            settings={settings}
+            plans={simplePlans}
+            companyExpenses={companyExpenses}
+            activeClients={activeClients}
+            onNavigateToSubscription={() => handleNavigateTab('subscription')}
+            onNavigateToPerformance={() => handleNavigateTab('performance')}
           />
         )}
       </div>

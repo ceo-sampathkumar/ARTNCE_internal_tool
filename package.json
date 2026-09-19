@@ -8,7 +8,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node tests/verify-calculator.js",
+    "test": "node tests/verify-calculator.js && node tests/test-editable-company-performance.js && node tests/test-curate-subscription-sync.js && node tests/test-client-dropdown-selection.js && node tests/test-startup-growth.js && node tests/test-financial-integrity-audit.js && node tests/test-section-c-art-price.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio"

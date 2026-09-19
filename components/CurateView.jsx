@@ -75,8 +75,13 @@ export default function CurateView({
       }
       return false;
     }
+    const resolvedId = (curationContext.id && curationContext.id !== 'undefined')
+      ? curationContext.id
+      : `cur_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
     const clientData = {
-      id: curationContext.id || undefined,
+      ...curationContext,
+      id: resolvedId,
       clientName: curationContext.clientName.trim(),
       collectionName: curationContext.collectionName?.trim() || 'Client Collection',
       location: curationContext.location?.trim() || '',
@@ -103,6 +108,9 @@ export default function CurateView({
       notes: curationContext.notes || '',
       curatorProjectFee: Number(curationContext.curatorProjectFee) || 2000,
     };
+    if (!curationContext.id || curationContext.id === 'undefined') {
+      onUpdateContext('id', resolvedId);
+    }
     if (onSaveCuratedClient) {
       onSaveCuratedClient(clientData);
     }
@@ -281,6 +289,7 @@ export default function CurateView({
             <button
               type="button"
               onClick={() => {
+                onUpdateContext('id', '');
                 onUpdateContext('clientName', '');
                 onUpdateContext('collectionName', 'New Collection');
                 onUpdateContext('location', '');

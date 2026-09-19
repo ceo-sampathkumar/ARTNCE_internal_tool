@@ -91,10 +91,16 @@ export default function SubscriptionView({
   initialScreen = 'calculator', // 'calculator' | 'performance'
   curatedClients: propCuratedClients,
   onSaveCuratedClient,
+  onSelectCuratedClient,
   activeClients: propActiveClients,
   onUpdateActiveClients,
   currentCurateClientName,
+  plans: propPlans,
+  onUpdatePlans,
+  companyExpenses: propCompanyExpenses,
+  onUpdateCompanyExpenses,
   onNavigateToCurate,
+  onNavigateToSubscription,
   onNavigateToBatch,
 }) {
   const symbol = settings.currencySymbol || '₹';
@@ -107,7 +113,7 @@ export default function SubscriptionView({
   /* -----------------------------------------------------------------------
    * Persistent State Initialization
    * ---------------------------------------------------------------------*/
-  const [plans, setPlans] = useState(() => {
+  const [localPlans, setLocalPlans] = useState(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY_SIMPLE_PLANS);
@@ -118,6 +124,9 @@ export default function SubscriptionView({
     }
     return DEFAULT_SIMPLE_PLANS;
   });
+
+  const plans = propPlans !== undefined ? propPlans : localPlans;
+  const setPlans = onUpdatePlans || setLocalPlans;
 
   // Local active clients fallback if not provided via props
   const [localActiveClients, setLocalActiveClients] = useState(() => {
@@ -148,9 +157,21 @@ export default function SubscriptionView({
     return DEFAULT_CURATED_CLIENTS;
   });
 
-  const curatedClientsList = propCuratedClients !== undefined ? propCuratedClients : localCuratedClients;
+  const rawCuratedList = propCuratedClients !== undefined ? propCuratedClients : localCuratedClients;
+  const curatedClientsList = useMemo(() => {
+    if (!Array.isArray(rawCuratedList)) return [];
+    return rawCuratedList.map((c, idx) => {
+      const fallbackId = (c.clientName && c.clientName.trim())
+        ? `cur_${c.clientName.toLowerCase().replace(/[^a-z0-9]/g, '')}`
+        : `cur_client_${idx}`;
+      return {
+        ...c,
+        id: (c.id && c.id !== 'undefined') ? c.id : fallbackId,
+      };
+    });
+  }, [rawCuratedList]);
 
-  const [companyExpenses, setCompanyExpenses] = useState(() => {
+  const [localCompanyExpenses, setLocalCompanyExpenses] = useState(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         const saved = window.localStorage.getItem(STORAGE_KEY_COMPANY_EXPENSES);
@@ -161,6 +182,9 @@ export default function SubscriptionView({
     }
     return DEFAULT_COMPANY_MONTHLY_EXPENSES;
   });
+
+  const companyExpenses = propCompanyExpenses !== undefined ? propCompanyExpenses : localCompanyExpenses;
+  const setCompanyExpenses = onUpdateCompanyExpenses || setLocalCompanyExpenses;
 
   // Persist state changes to localStorage
   useEffect(() => {
@@ -190,7 +214,7 @@ export default function SubscriptionView({
       );
       if (match) return match.id;
     }
-    return curatedClientsList?.[0]?.id || 'cur_asiapaints';
+    return curatedClientsList?.[0]?.id || '';
   });
 
   // Currently selected curated client object
@@ -199,11 +223,26 @@ export default function SubscriptionView({
     if (selectedClientId === '') return null;
     return (
       curatedClientsList.find((c) => c.id === selectedClientId) ||
-      curatedClientsList.find((c) => c.clientName?.toLowerCase() === 'asiapaints') ||
+      curatedClientsList.find(
+        (c) => c.clientName && selectedClientId && c.clientName.trim().toLowerCase() === selectedClientId.trim().toLowerCase()
+      ) ||
       curatedClientsList[0] ||
       null
     );
   }, [curatedClientsList, selectedClientId]);
+
+  // Sync when currentCurateClientName prop changes (e.g. navigation from 03 CURATE)
+  useEffect(() => {
+    if (currentCurateClientName && curatedClientsList.length > 0) {
+      const match = curatedClientsList.find(
+        (c) => c.clientName?.trim().toLowerCase() === currentCurateClientName.trim().toLowerCase()
+      );
+      if (match && match.id !== selectedClientId) {
+        handleSelectClientFromDropdown(match.id);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCurateClientName, curatedClientsList]);
 
   // Check if selected curated client already exists in active subscriptions
   const existingSubscription = useMemo(() => {
@@ -248,6 +287,8 @@ export default function SubscriptionView({
     const commission = Math.round(base * ((defaultTier.commissionPercent || 20) / 100));
     const total = base + commission;
 
+    setArtPriceInput(total);
+
     if (onSaveCuratedClient) {
       onSaveCuratedClient({
         ...selectedCuratedClient,
@@ -266,12 +307,18 @@ export default function SubscriptionView({
   const [artworkCountInput, setArtworkCountInput] = useState(() => {
     return selectedCuratedClient?.artworkCount || currentPlanTemplate.artworkCount || 3;
   });
+  const [artPriceInput, setArtPriceInput] = useState(() => {
+    return selectedCuratedClient?.totalArtworkInvestment ?? clientArtworkInvestment.total ?? 15120;
+  });
   const [monthlyPriceInput, setMonthlyPriceInput] = useState(() => {
     return currentPlanTemplate.monthlySubscription || 12500;
   });
   const [planCosts, setPlanCosts] = useState(() => {
     return currentPlanTemplate.costs ? JSON.parse(JSON.stringify(currentPlanTemplate.costs)) : [];
   });
+
+  // Section C View Mode: 'monthly' (Cash flow / month) or 'annual' (12-month total term)
+  const [planResultViewMode, setPlanResultViewMode] = useState('monthly');
 
   // Live sync inputs when selectedCuratedClient is updated in 03 CURATE
   useEffect(() => {
@@ -282,14 +329,27 @@ export default function SubscriptionView({
       if (selectedCuratedClient.artworkCount !== undefined && selectedCuratedClient.artworkCount !== null) {
         setArtworkCountInput(selectedCuratedClient.artworkCount);
       }
+      if (selectedCuratedClient.totalArtworkInvestment) {
+        setArtPriceInput(selectedCuratedClient.totalArtworkInvestment);
+      } else if (clientArtworkInvestment.total) {
+        setArtPriceInput(clientArtworkInvestment.total);
+      }
     }
-  }, [selectedCuratedClient]);
+  }, [selectedCuratedClient, clientArtworkInvestment.total]);
 
   // Sync inputs whenever client selection changes
   const handleSelectClientFromDropdown = (clientId) => {
     setSelectedClientId(clientId);
-    const target = curatedClientsList.find((c) => c.id === clientId);
+    if (!clientId) return;
+
+    const target = curatedClientsList.find(
+      (c) => c.id === clientId || (c.clientName && c.clientName.trim().toLowerCase() === clientId.trim().toLowerCase())
+    );
     if (!target) return;
+
+    if (onSelectCuratedClient) {
+      onSelectCuratedClient(target);
+    }
 
     // Check if this client already has an active subscription
     const existing = activeClients.find(
@@ -304,12 +364,14 @@ export default function SubscriptionView({
       // 03 CURATE is single source of truth for spaceSqFt and artworkCount
       setSpaceSqFtInput(target.spaceSqFt ?? existing.spaceSqFt ?? 2000);
       setArtworkCountInput(target.artworkCount ?? existing.artworkCount ?? 3);
+      setArtPriceInput(existing.totalArtworkInvestment ?? target.totalArtworkInvestment ?? clientArtworkInvestment.total ?? 15120);
       setPlanCosts(existing.costs ? JSON.parse(JSON.stringify(existing.costs)) : []);
       showToast(`Loaded active subscription for "${target.clientName}".`);
     } else {
       const tpl = plans[selectedPlanId] || DEFAULT_SIMPLE_PLANS[selectedPlanId] || DEFAULT_SIMPLE_PLANS.essential;
       setSpaceSqFtInput(target.spaceSqFt ?? tpl.spaceSqFt ?? 2000);
       setArtworkCountInput(target.artworkCount ?? tpl.artworkCount ?? 3);
+      setArtPriceInput(target.totalArtworkInvestment ?? clientArtworkInvestment.total ?? 15120);
       setMonthlyPriceInput(tpl.monthlySubscription || 12500);
 
       // Load client-specific activities from 03 CURATE data
@@ -375,14 +437,17 @@ export default function SubscriptionView({
   };
 
   /* -----------------------------------------------------------------------
-   * Screen 1: Calculations
+   * Screen 1: Calculations (Client Pay - Delivery Cost - Art Price = Net Contribution)
    * ---------------------------------------------------------------------*/
+  const effectiveArtPrice = Math.max(0, Number(artPriceInput) || 0);
+
   const planResult = useMemo(() => {
     return calculateSimplePlanResult({
       monthlySubscription: Number(monthlyPriceInput) || 0,
       costs: planCosts,
+      artPrice: effectiveArtPrice,
     });
-  }, [monthlyPriceInput, planCosts]);
+  }, [monthlyPriceInput, planCosts, effectiveArtPrice]);
 
   // Client-specific economics based on actual frequencies over 12-month period
   const clientEconomics = useMemo(() => {
@@ -390,8 +455,9 @@ export default function SubscriptionView({
       costs: planCosts,
       monthlyFee: Number(monthlyPriceInput) || 0,
       periodMonths: 12,
+      artPrice: effectiveArtPrice,
     });
-  }, [planCosts, monthlyPriceInput]);
+  }, [planCosts, monthlyPriceInput, effectiveArtPrice]);
 
   // Handle adding a new cost row
   const handleAddCost = () => {
@@ -451,11 +517,14 @@ export default function SubscriptionView({
       costs: planCosts,
       monthlyFee,
       periodMonths: 12,
+      artPrice: effectiveArtPrice,
     });
     const totalSpend = Math.round(clientEcon.totalSpend);
     const avgMonthlySpend = Math.round(clientEcon.avgMonthlySpend);
     const monthlyCost = avgMonthlySpend;
     const monthlyContrib = Math.round(clientEcon.monthlyContribution);
+    const monthlyContribBeforeArt = Math.round(clientEcon.monthlyContributionBeforeArt);
+    const totalNetContrib = Math.round(clientEcon.totalNetContribution);
 
     const subRecord = {
       id: existingSubscription ? existingSubscription.id : `sub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -472,9 +541,13 @@ export default function SubscriptionView({
       avgMonthlySpend,
       monthlyCost,
       monthlyContribution: monthlyContrib,
-      totalArtworkInvestment: clientArtworkInvestment.total,
+      monthlyContributionBeforeArt: monthlyContribBeforeArt,
+      totalArtworkInvestment: effectiveArtPrice,
       baseArtworkValue: clientArtworkInvestment.base,
       commissionValue: clientArtworkInvestment.commission,
+      monthlyArtCost: Math.round(clientEcon.monthlyArtCost),
+      totalNetContribution: totalNetContrib,
+      recoveryMonths: clientEcon.recoveryMonths,
       costs: JSON.parse(JSON.stringify(planCosts)),
       updatedAt: new Date().toISOString(),
     };
@@ -497,15 +570,17 @@ export default function SubscriptionView({
       showToast(`Assigned ${currentPlanTemplate.name} plan to "${selectedCuratedClient.clientName}". Added to Active Clients & Plans.`);
     }
 
-    // If space or artwork count was customized during subscription setup, sync back to 03 CURATE master
+    // If space, artwork count, or art price was customized during subscription setup, sync back to 03 CURATE master
     if (onSaveCuratedClient && (
       (Number(spaceSqFtInput) && Number(spaceSqFtInput) !== selectedCuratedClient.spaceSqFt) ||
-      (Number(artworkCountInput) && Number(artworkCountInput) !== selectedCuratedClient.artworkCount)
+      (Number(artworkCountInput) && Number(artworkCountInput) !== selectedCuratedClient.artworkCount) ||
+      (effectiveArtPrice && effectiveArtPrice !== selectedCuratedClient.totalArtworkInvestment)
     )) {
       onSaveCuratedClient({
         ...selectedCuratedClient,
         spaceSqFt: Number(spaceSqFtInput) || selectedCuratedClient.spaceSqFt || 0,
         artworkCount: Number(artworkCountInput) || selectedCuratedClient.artworkCount || 0,
+        totalArtworkInvestment: effectiveArtPrice,
       });
     }
   };
@@ -519,14 +594,19 @@ export default function SubscriptionView({
     );
     if (matched) {
       setSelectedClientId(matched.id);
+      if (onSelectCuratedClient) {
+        onSelectCuratedClient(matched);
+      }
       setSpaceSqFtInput(matched.spaceSqFt ?? client.spaceSqFt ?? 2000);
       setArtworkCountInput(matched.artworkCount ?? client.artworkCount ?? 3);
+      setArtPriceInput(client.totalArtworkInvestment ?? matched.totalArtworkInvestment ?? 15120);
     } else {
       if (client.clientId) {
         setSelectedClientId(client.clientId);
       }
       setSpaceSqFtInput(client.spaceSqFt ?? 2000);
       setArtworkCountInput(client.artworkCount ?? 3);
+      setArtPriceInput(client.totalArtworkInvestment ?? 15120);
     }
     setSelectedPlanId(client.planId || 'essential');
     setMonthlyPriceInput(client.monthlyFee || 12500);
@@ -560,6 +640,7 @@ export default function SubscriptionView({
   const clientTotals = useMemo(() => {
     let totalRevenue = 0;
     let totalCost = 0;
+    let totalArtPrice = 0;
     let totalContribution = 0;
 
     for (const c of activeClients) {
@@ -570,12 +651,14 @@ export default function SubscriptionView({
           ? Math.round(calculateClientEconomics({ costs: c.costs, monthlyFee: fee, periodMonths: 12 }).avgMonthlySpend)
           : (Number(c.monthlyCost) || 0);
       }
+      const art = Number(c.totalArtworkInvestment) || 0;
       const contrib = c.monthlyContribution !== undefined && c.monthlyContribution !== null
         ? Number(c.monthlyContribution)
-        : (fee - spend);
+        : (fee - spend - Math.round(art / 12));
 
       totalRevenue += fee;
       totalCost += spend;
+      totalArtPrice += art;
       totalContribution += contrib;
     }
 
@@ -585,6 +668,8 @@ export default function SubscriptionView({
       count: activeClients.length,
       totalRevenue,
       totalCost,
+      totalDeliveryCost: totalCost,
+      totalArtPrice,
       totalContribution,
       marginPct,
     };
@@ -594,6 +679,8 @@ export default function SubscriptionView({
    * Screen 2: Company Performance State & Calculations
    * ---------------------------------------------------------------------*/
   const [additionalPlanType, setAdditionalPlanType] = useState('essential');
+  const [customPlanContribOverride, setCustomPlanContribOverride] = useState('');
+  const [showActiveClientsModal, setShowActiveClientsModal] = useState(false);
 
   // Compute contribution of each of the 5 plans based on current configured values
   const planContributions = useMemo(() => {
@@ -614,23 +701,123 @@ export default function SubscriptionView({
   }, [plans]);
 
   const selectedPlanContrib = planContributions[additionalPlanType] || 0;
+  const effectivePlanContrib =
+    customPlanContribOverride !== '' && !isNaN(Number(customPlanContribOverride)) && Number(customPlanContribOverride) >= 0
+      ? Number(customPlanContribOverride)
+      : selectedPlanContrib;
+
+  const isTechOneTime = companyExpenses.technologyIsOneTime !== undefined
+    ? !!companyExpenses.technologyIsOneTime
+    : (Number(companyExpenses.technologySoftware) >= 50000);
+
+  const effectiveCompanyExpenses = useMemo(() => {
+    return {
+      ...companyExpenses,
+      technologyIsOneTime: isTechOneTime,
+    };
+  }, [companyExpenses, isTechOneTime]);
 
   // Screen 2 Performance Engine
   const performance = useMemo(() => {
     return calculateCompanyTargetPerformance({
-      companyExpenses,
+      companyExpenses: effectiveCompanyExpenses,
       activeClients,
-      selectedPlanContribution: selectedPlanContrib,
+      selectedPlanContribution: effectivePlanContrib,
     });
-  }, [companyExpenses, activeClients, selectedPlanContrib]);
+  }, [effectiveCompanyExpenses, activeClients, effectivePlanContrib]);
 
   // Handle updating company monthly expense items
   const handleUpdateCompanyExpense = (field, value) => {
-    const cleanNum = Math.max(0, Number(value) || 0);
+    const val = value === '' ? '' : Math.max(0, Number(value) || 0);
     setCompanyExpenses((prev) => ({
       ...prev,
-      [field]: cleanNum,
+      [field]: val,
     }));
+  };
+
+  const handleToggleTechnologyOneTime = (forcedVal) => {
+    const nextVal = forcedVal !== undefined ? forcedVal : !isTechOneTime;
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      technologyIsOneTime: nextVal,
+    }));
+  };
+
+  const handleExpenseBlur = (field) => {
+    setCompanyExpenses((prev) => {
+      if (prev[field] === '') {
+        return { ...prev, [field]: 0 };
+      }
+      return prev;
+    });
+  };
+
+  const currentOtherExpenses =
+    companyExpenses.otherExpenses === ''
+      ? ''
+      : (Number(companyExpenses.otherExpenses) || 0) + (Number(companyExpenses.otherInvestments) || 0);
+
+  const handleUpdateOtherExpense = (value) => {
+    const val = value === '' ? '' : Math.max(0, Number(value) || 0);
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      otherExpenses: val,
+      otherInvestments: 0,
+    }));
+  };
+
+  const handleAddCustomExpense = () => {
+    const newItem = {
+      id: `exp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: 'Custom Overhead',
+      amount: 10000,
+    };
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      customItems: [...(prev.customItems || []), newItem],
+    }));
+    setToastMessage('Added custom overhead expense');
+    setTimeout(() => setToastMessage(''), 2500);
+  };
+
+  const handleUpdateCustomExpense = (id, field, value) => {
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      customItems: (prev.customItems || []).map((item) => {
+        if (item.id !== id) return item;
+        if (field === 'amount') {
+          return { ...item, amount: value === '' ? '' : Math.max(0, Number(value) || 0) };
+        }
+        return { ...item, [field]: value };
+      }),
+    }));
+  };
+
+  const handleCustomExpenseBlur = (id) => {
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      customItems: (prev.customItems || []).map((item) => {
+        if (item.id === id && item.amount === '') {
+          return { ...item, amount: 0 };
+        }
+        return item;
+      }),
+    }));
+  };
+
+  const handleRemoveCustomExpense = (id) => {
+    setCompanyExpenses((prev) => ({
+      ...prev,
+      customItems: (prev.customItems || []).filter((item) => item.id !== id),
+    }));
+    setToastMessage('Removed custom overhead expense');
+    setTimeout(() => setToastMessage(''), 2500);
+  };
+
+  const handleResetCompanyExpenses = () => {
+    setCompanyExpenses(DEFAULT_COMPANY_MONTHLY_EXPENSES);
+    setToastMessage('Reset company expenses to defaults (₹4,60,000)');
+    setTimeout(() => setToastMessage(''), 2500);
   };
 
   return (
@@ -878,8 +1065,8 @@ export default function SubscriptionView({
               </div>
             </div>
 
-            {/* Plan-specific Values: Space, Artwork Count, Monthly Subscription Price */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            {/* Plan-specific Values: Space, Artwork Count, Art Price, Monthly Subscription Price */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Space / Area */}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: C.ink }}>
@@ -923,6 +1110,30 @@ export default function SubscriptionView({
                 </span>
               </div>
 
+              {/* Art Price (Artwork Investment) */}
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: C.ink }}>
+                  Art Price (Artwork Value)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-sm font-mono font-medium" style={{ color: C.ink }}>
+                    {symbol}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="15120"
+                    value={artPriceInput}
+                    onChange={(e) => setArtPriceInput(e.target.value)}
+                    className="w-full pl-8 pr-3.5 py-2 rounded text-sm outline-none transition-colors border font-mono font-bold bg-white text-amber-900"
+                    style={{ borderColor: C.rule }}
+                  />
+                </div>
+                <span className="text-[11px] mt-1 block" style={{ color: C.inkMuted }}>
+                  Artwork value from 03 CURATE / Size Pricing
+                </span>
+              </div>
+
               {/* Monthly Subscription Price */}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: C.ink }}>
@@ -962,29 +1173,34 @@ export default function SubscriptionView({
                   SECTION B
                 </span>
                 <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.inkMuted }}>
-                  Monthly &amp; Direct Costs
+                  Monthly &amp; Direct Delivery Costs
                 </span>
                 <h2 className="text-lg sm:text-xl font-bold mt-0.5" style={{ fontFamily: FONT_DISPLAY }}>
-                  Plan Costs
+                  Plan Delivery Costs
                 </h2>
                 <p className="text-xs mt-1" style={{ color: C.inkMuted }}>
-                  Each cost respects its individual billing frequency. Do NOT assume every cost is monthly.
+                  Each delivery &amp; service activity respects its individual billing frequency. Total spend over 12 months divides into avg. monthly delivery cost.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleAddCost}
-                className="px-3.5 py-2 rounded text-xs font-medium transition-colors flex items-center gap-1.5 self-start sm:self-auto border"
-                style={{
-                  backgroundColor: C.paperDark,
-                  borderColor: C.rule,
-                  color: C.ink,
-                }}
-              >
-                <Plus size={14} />
-                <span>+ Add Cost</span>
-              </button>
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                <div className="px-3 py-1.5 rounded text-xs font-mono border bg-white text-stone-700 hidden sm:block" style={{ borderColor: C.rule }}>
+                  Avg. Delivery: <strong className="text-stone-900">{money(clientEconomics.avgMonthlySpend)}</strong>/mo
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddCost}
+                  className="px-3.5 py-2 rounded text-xs font-medium transition-colors flex items-center gap-1.5 border"
+                  style={{
+                    backgroundColor: C.paperDark,
+                    borderColor: C.rule,
+                    color: C.ink,
+                  }}
+                >
+                  <Plus size={14} />
+                  <span>+ Add Cost</span>
+                </button>
+              </div>
             </div>
 
             {/* Cost Items Table */}
@@ -1076,97 +1292,239 @@ export default function SubscriptionView({
           </div>
 
           {/* -----------------------------------------------------------------
-           * 4. PLAN RESULT (Section C: 4 Simple Cards)
-           * CLIENT PAYS - PLAN COST = CONTRIBUTION
+           * 4. PLAN RESULT (Section C: 4 Simple Cards + Waterfall Equation)
+           * CLIENT PAYS − DELIVERY COST − ART PRICE = NET CONTRIBUTION
            * ---------------------------------------------------------------*/}
           <div
             className="p-6 rounded border shadow-sm"
             style={{ backgroundColor: C.paper, borderColor: C.rule }}
           >
-            <div className="flex items-center justify-between pb-3 mb-4 border-b" style={{ borderColor: C.rule }}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-4 border-b gap-3" style={{ borderColor: C.rule }}>
               <div>
-                <span className="text-[10px] tracking-wider uppercase font-mono px-2 py-0.5 rounded mr-2" style={{ backgroundColor: C.paperDark, color: C.inkMuted }}>
-                  SECTION C
-                </span>
-                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.inkMuted }}>
-                  Plan Result
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] tracking-wider uppercase font-mono px-2 py-0.5 rounded" style={{ backgroundColor: C.paperDark, color: C.inkMuted }}>
+                    SECTION C
+                  </span>
+                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: C.inkMuted }}>
+                    Plan Result
+                  </span>
+                </div>
                 <h2 className="text-lg sm:text-xl font-bold mt-0.5" style={{ fontFamily: FONT_DISPLAY }}>
-                  Contribution Summary
+                  Contribution &amp; Plan Result Summary
                 </h2>
               </div>
-              <div className="hidden sm:inline-flex px-3 py-1 rounded text-xs font-mono font-medium border" style={{ backgroundColor: C.paperDark, borderColor: C.rule }}>
-                CLIENT PAYS − PLAN COST = CONTRIBUTION
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* View Mode Toggle: Monthly vs 12-Month Total */}
+                <div className="inline-flex rounded border bg-white p-0.5 text-xs font-mono" style={{ borderColor: C.rule }}>
+                  <button
+                    type="button"
+                    onClick={() => setPlanResultViewMode('monthly')}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      planResultViewMode === 'monthly'
+                        ? 'bg-stone-900 text-white font-semibold shadow-xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    Monthly Rate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlanResultViewMode('annual')}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      planResultViewMode === 'annual'
+                        ? 'bg-stone-900 text-white font-semibold shadow-xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    12-Month Total
+                  </button>
+                </div>
+
+                <div className="hidden sm:inline-flex px-3 py-1 rounded text-xs font-mono font-medium border" style={{ backgroundColor: C.paperDark, borderColor: C.rule }}>
+                  CLIENT PAYS − DELIVERY COST − ART PRICE = NET CONTRIBUTION
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Card 1: Monthly Fee */}
+              {/* Card 1: Client Pay */}
               <div
-                className="p-4 rounded border bg-white"
+                className="p-4 rounded border bg-white flex flex-col justify-between"
                 style={{ borderColor: C.rule }}
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: C.inkMuted }}>
-                  Monthly Fee
-                </span>
-                <div className="text-xl sm:text-2xl font-bold mt-2 font-mono" style={{ color: C.ink }}>
-                  {money(clientEconomics.monthlyFee || Number(monthlyPriceInput))}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: C.inkMuted }}>
+                      1. Client Pay
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 uppercase font-semibold">
+                      {planResultViewMode === 'annual' ? '12-Mo Total' : 'Monthly Fee'}
+                    </span>
+                  </div>
+                  <div className="text-xl sm:text-2xl font-bold mt-2 font-mono" style={{ color: C.ink }}>
+                    {money(planResultViewMode === 'annual' ? (clientEconomics.monthlyFee || Number(monthlyPriceInput)) * 12 : (clientEconomics.monthlyFee || Number(monthlyPriceInput)))}
+                  </div>
                 </div>
-                <span className="text-[11px] mt-1 block text-gray-500">Client monthly subscription</span>
+                <div className="mt-2 pt-2 border-t text-[11px] text-gray-500" style={{ borderColor: C.rule }}>
+                  {planResultViewMode === 'annual'
+                    ? `${money(clientEconomics.monthlyFee || Number(monthlyPriceInput))}/mo × 12 months`
+                    : `12-mo total: ${money((clientEconomics.monthlyFee || Number(monthlyPriceInput)) * 12)}`}
+                </div>
               </div>
 
-              {/* Card 2: Total Spend */}
+              {/* Card 2: Delivery Cost */}
               <div
-                className="p-4 rounded border bg-white"
+                className="p-4 rounded border bg-white flex flex-col justify-between"
                 style={{ borderColor: C.rule }}
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: C.inkMuted }}>
-                  Total Spend
-                </span>
-                <div className="text-xl sm:text-2xl font-bold mt-2 font-mono text-stone-800">
-                  {money(clientEconomics.totalSpend)}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider block text-red-800">
+                      2. Delivery Cost
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-red-50 text-red-700 uppercase font-semibold">
+                      {planResultViewMode === 'annual' ? 'Total Spend' : 'Avg / Mo'}
+                    </span>
+                  </div>
+                  <div className="text-xl sm:text-2xl font-bold mt-2 font-mono text-stone-800">
+                    {money(planResultViewMode === 'annual' ? clientEconomics.totalSpend : clientEconomics.avgMonthlySpend)}
+                  </div>
                 </div>
-                <span className="text-[11px] mt-1 block text-gray-500">Actual spend over 12 mo</span>
+                <div className="mt-2 pt-2 border-t text-[11px] text-gray-500" style={{ borderColor: C.rule }}>
+                  {planResultViewMode === 'annual'
+                    ? `Sum of plan costs over 12 mo`
+                    : `12-mo total: ${money(clientEconomics.totalSpend)}`}
+                </div>
               </div>
 
-              {/* Card 3: Avg. Monthly Spend */}
+              {/* Card 3: Art Price */}
               <div
-                className="p-4 rounded border bg-white"
+                className="p-4 rounded border bg-white flex flex-col justify-between"
                 style={{ borderColor: C.rule }}
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: C.inkMuted }}>
-                  Avg. Monthly Spend
-                </span>
-                <div className="text-xl sm:text-2xl font-bold mt-2 font-mono text-stone-700">
-                  {money(clientEconomics.avgMonthlySpend)}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider block text-amber-800">
+                      3. Art Price
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 uppercase font-semibold">
+                      {planResultViewMode === 'annual' ? 'Full Value' : 'Amortized'}
+                    </span>
+                  </div>
+                  <div className="text-xl sm:text-2xl font-bold mt-2 font-mono text-amber-900">
+                    {money(planResultViewMode === 'annual' ? effectiveArtPrice : clientEconomics.monthlyArtCost)}
+                  </div>
                 </div>
-                <span className="text-[11px] mt-1 block text-gray-500">Total spend ÷ 12 months</span>
+                <div className="mt-2 pt-2 border-t text-[11px] text-gray-500" style={{ borderColor: C.rule }}>
+                  {planResultViewMode === 'annual'
+                    ? `Amortized: ${money(clientEconomics.monthlyArtCost)}/mo`
+                    : `Total art value: ${money(effectiveArtPrice)}`}
+                </div>
               </div>
 
-              {/* Card 4: Monthly Contribution */}
+              {/* Card 4: Net Contribution */}
               <div
-                className="p-4 rounded border"
+                className="p-4 rounded border flex flex-col justify-between"
                 style={{
                   backgroundColor: clientEconomics.monthlyContribution >= 0 ? '#F0FDF4' : '#FEF2F2',
                   borderColor: clientEconomics.monthlyContribution >= 0 ? '#BBF7D0' : '#FECACA',
                 }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#166534' : '#991B1B' }}>
-                    Monthly Contribution
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#166534' : '#991B1B' }}>
+                      Net Contribution
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/90 shadow-xs" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}>
+                      {clientEconomics.contributionPercent.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div
+                    className="text-xl sm:text-2xl font-bold mt-2 font-mono"
+                    style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}
+                  >
+                    {money(planResultViewMode === 'annual' ? clientEconomics.totalNetContribution : clientEconomics.monthlyContribution)}
+                  </div>
+                </div>
+                <div className="mt-2 pt-2 border-t text-[11px]" style={{ borderColor: clientEconomics.monthlyContribution >= 0 ? '#BBF7D0' : '#FECACA', color: clientEconomics.monthlyContribution >= 0 ? '#166534' : '#991B1B' }}>
+                  {planResultViewMode === 'annual'
+                    ? `12-mo Net Cash = Client Pay − Delivery − Art`
+                    : `Monthly Net = Fee − Delivery/mo − Art/mo`}
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Waterfall Equation Bar */}
+            <div className="mt-4 p-4 rounded border bg-white" style={{ borderColor: C.rule }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 mb-3 border-b text-xs font-mono" style={{ borderColor: C.rule }}>
+                <span className="font-semibold uppercase tracking-wider text-stone-700">
+                  Plan Result Calculation ({planResultViewMode === 'annual' ? '12-Month Annual Total' : 'Monthly Cash Flow'})
+                </span>
+                {clientEconomics.recoveryMonths !== null && clientEconomics.recoveryMonths > 0 && (
+                  <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 font-semibold text-[11px]">
+                    Art Price Recouped In: <strong>{clientEconomics.recoveryMonths} months</strong>
                   </span>
-                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/80" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}>
-                    {clientEconomics.contributionPercent.toFixed(1)}%
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-7 items-center text-center gap-2 font-mono py-1">
+                {/* 1. Client Pay */}
+                <div className="p-2.5 rounded bg-stone-50 border sm:col-span-2" style={{ borderColor: C.rule }}>
+                  <span className="text-[10px] uppercase font-semibold text-gray-500 block">1. Client Pay</span>
+                  <div className="text-base font-bold text-stone-900 mt-0.5">
+                    {money(planResultViewMode === 'annual' ? (clientEconomics.monthlyFee || Number(monthlyPriceInput)) * 12 : (clientEconomics.monthlyFee || Number(monthlyPriceInput)))}
+                  </div>
+                  <span className="text-[10px] text-gray-500">{planResultViewMode === 'annual' ? '12 mo subscription' : 'per month'}</span>
+                </div>
+
+                {/* Operator - */}
+                <div className="text-xl font-bold text-stone-400 select-none hidden sm:block">−</div>
+
+                {/* 2. Delivery Cost */}
+                <div className="p-2.5 rounded bg-red-50/50 border border-red-100 sm:col-span-1">
+                  <span className="text-[10px] uppercase font-semibold text-red-700 block">2. Delivery Cost</span>
+                  <div className="text-base font-bold text-stone-800 mt-0.5">
+                    {money(planResultViewMode === 'annual' ? clientEconomics.totalSpend : clientEconomics.avgMonthlySpend)}
+                  </div>
+                  <span className="text-[10px] text-gray-500">{planResultViewMode === 'annual' ? 'all activities' : 'avg/mo'}</span>
+                </div>
+
+                {/* Operator - */}
+                <div className="text-xl font-bold text-stone-400 select-none hidden sm:block">−</div>
+
+                {/* 3. Art Price */}
+                <div className="p-2.5 rounded bg-amber-50/50 border border-amber-100 sm:col-span-1">
+                  <span className="text-[10px] uppercase font-semibold text-amber-800 block">3. Art Price</span>
+                  <div className="text-base font-bold text-amber-900 mt-0.5">
+                    {money(planResultViewMode === 'annual' ? effectiveArtPrice : clientEconomics.monthlyArtCost)}
+                  </div>
+                  <span className="text-[10px] text-gray-500">{planResultViewMode === 'annual' ? 'full artwork' : 'amortized'}</span>
+                </div>
+
+                {/* Operator = & 4. Net Contribution */}
+                <div className="p-2.5 rounded sm:col-span-1 border" style={{
+                  backgroundColor: clientEconomics.monthlyContribution >= 0 ? '#F0FDF4' : '#FEF2F2',
+                  borderColor: clientEconomics.monthlyContribution >= 0 ? '#BBF7D0' : '#FECACA',
+                }}>
+                  <span className="text-[10px] uppercase font-semibold block" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#166534' : '#991B1B' }}>
+                    = Net Contribution
+                  </span>
+                  <div className="text-base font-bold mt-0.5" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}>
+                    {money(planResultViewMode === 'annual' ? clientEconomics.totalNetContribution : clientEconomics.monthlyContribution)}
+                  </div>
+                  <span className="text-[10px] font-semibold" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}>
+                    {clientEconomics.contributionPercent.toFixed(1)}% margin
                   </span>
                 </div>
-                <div
-                  className="text-xl sm:text-2xl font-bold mt-2 font-mono"
-                  style={{ color: clientEconomics.monthlyContribution >= 0 ? '#15803D' : '#DC2626' }}
-                >
-                  {money(clientEconomics.monthlyContribution)}
-                </div>
-                <span className="text-[11px] mt-1 block" style={{ color: clientEconomics.monthlyContribution >= 0 ? '#166534' : '#991B1B' }}>
-                  Monthly Fee − Avg. Monthly Spend
+              </div>
+
+              <div className="mt-3 pt-2 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between text-[11px] text-gray-500 gap-1" style={{ borderColor: C.rule }}>
+                <span>
+                  Operating Contribution (before Art Price): <strong className="text-stone-800 font-mono">{money(planResultViewMode === 'annual' ? ((clientEconomics.monthlyFee || Number(monthlyPriceInput)) * 12 - clientEconomics.totalSpend) : clientEconomics.monthlyContributionBeforeArt)}</strong>
+                </span>
+                <span>
+                  Total Costs (Delivery + Art): <strong className="text-stone-800 font-mono">{money(planResultViewMode === 'annual' ? clientEconomics.totalCostOverPeriod : clientEconomics.avgMonthlyTotalCost)}</strong>
                 </span>
               </div>
             </div>
@@ -1252,10 +1610,10 @@ export default function SubscriptionView({
                     <th className="pb-3 font-semibold">Plan</th>
                     <th className="pb-3 font-semibold text-right">Space</th>
                     <th className="pb-3 font-semibold text-right">Paintings</th>
-                    <th className="pb-3 font-semibold text-right">Monthly Fee</th>
-                    <th className="pb-3 font-semibold text-right">Total Spend</th>
-                    <th className="pb-3 font-semibold text-right">Avg. Monthly Spend</th>
-                    <th className="pb-3 font-semibold text-right">Contribution</th>
+                    <th className="pb-3 font-semibold text-right">Client Pay</th>
+                    <th className="pb-3 font-semibold text-right">Delivery Cost</th>
+                    <th className="pb-3 font-semibold text-right">Art Price</th>
+                    <th className="pb-3 font-semibold text-right">Net Contribution</th>
                     <th className="pb-3 font-semibold text-center w-24">Actions</th>
                   </tr>
                 </thead>
@@ -1279,17 +1637,21 @@ export default function SubscriptionView({
                       ? curateClient.artworkCount
                       : client.artworkCount;
 
+                    const clientArtPrice = client.totalArtworkInvestment !== undefined
+                      ? client.totalArtworkInvestment
+                      : (curateClient.totalArtworkInvestment || 0);
+
                     const clientTotalSpend = client.totalSpend !== undefined
                       ? client.totalSpend
                       : (client.costs && client.costs.length > 0
-                          ? calculateClientEconomics({ costs: client.costs, monthlyFee: client.monthlyFee, periodMonths: 12 }).totalSpend
+                          ? calculateClientEconomics({ costs: client.costs, monthlyFee: client.monthlyFee, periodMonths: 12, artPrice: clientArtPrice }).totalSpend
                           : ((client.monthlyCost || 0) * 12));
                     const clientAvgSpend = client.avgMonthlySpend !== undefined
                       ? client.avgMonthlySpend
                       : Math.round(clientTotalSpend / 12);
                     const clientContrib = client.monthlyContribution !== undefined
                       ? client.monthlyContribution
-                      : (client.monthlyFee - clientAvgSpend);
+                      : (client.monthlyFee - clientAvgSpend - Math.round(clientArtPrice / 12));
 
                     return (
                       <tr
@@ -1330,25 +1692,29 @@ export default function SubscriptionView({
                           {displayArtworks || 0} pcs
                         </td>
 
-                        {/* Monthly Fee */}
+                        {/* Client Pay (Monthly Fee) */}
                         <td className="py-3 text-right font-mono font-bold pr-2" style={{ color: C.ink }}>
                           {money(client.monthlyFee)}
                         </td>
 
-                        {/* Total Spend */}
+                        {/* Delivery Cost (Monthly & 12-mo) */}
                         <td className="py-3 text-right font-mono text-stone-700 pr-2">
-                          <div className="font-semibold">{money(clientTotalSpend)}</div>
-                          <span className="text-[10px] text-gray-400 font-sans">12 mo</span>
+                          <div className="font-semibold text-red-800">{money(clientAvgSpend)}</div>
+                          <span className="text-[10px] text-gray-400 font-sans">12 mo: {money(clientTotalSpend)}</span>
                         </td>
 
-                        {/* Avg. Monthly Spend */}
+                        {/* Art Price (Total & Amortized) */}
                         <td className="py-3 text-right font-mono text-stone-700 pr-2">
-                          {money(clientAvgSpend)}
+                          <div className="font-semibold text-amber-900">{money(clientArtPrice)}</div>
+                          <span className="text-[10px] text-gray-400 font-sans">{money(Math.round(clientArtPrice / 12))}/mo</span>
                         </td>
 
-                        {/* Contribution */}
+                        {/* Net Contribution */}
                         <td className="py-3 text-right font-mono font-bold pr-2" style={{ color: clientContrib >= 0 ? '#15803D' : '#DC2626' }}>
-                          {money(clientContrib)}
+                          <div>{money(clientContrib)}</div>
+                          <span className="text-[10px] font-sans font-normal" style={{ color: clientContrib >= 0 ? '#166534' : '#991B1B' }}>
+                            {client.monthlyFee > 0 ? ((clientContrib / client.monthlyFee) * 100).toFixed(1) : 0}%
+                          </span>
                         </td>
 
                         {/* Actions */}
@@ -1386,7 +1752,7 @@ export default function SubscriptionView({
 
                   {activeClients.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-xs text-gray-500">
+                      <td colSpan={9} className="py-8 text-center text-xs text-gray-500">
                         No active subscription clients yet. Select a client from 03 CURATE above, choose a plan, and click{' '}
                         <strong>SUBMIT SUBSCRIPTION</strong> to assign their subscription.
                       </td>
@@ -1398,21 +1764,22 @@ export default function SubscriptionView({
                 {activeClients.length > 0 && (
                   <tfoot>
                     <tr className="border-t-2 font-semibold text-xs sm:text-sm" style={{ borderColor: C.ink, backgroundColor: C.paperDark }}>
-                      <td className="py-3 pl-3">
+                      <td colSpan={4} className="py-3 pl-3">
                         TOTALS ({clientTotals.count} Clients)
-                      </td>
-                      <td className="py-3">
-                        <span className="text-[11px] font-normal text-gray-600">
+                        <span className="ml-2 text-[11px] font-normal text-gray-600">
                           Margin: {clientTotals.marginPct.toFixed(1)}%
                         </span>
                       </td>
-                      <td className="py-3 text-right font-mono text-sm sm:text-base font-bold" style={{ color: C.ink }}>
+                      <td className="py-3 text-right font-mono text-sm sm:text-base font-bold pr-2" style={{ color: C.ink }}>
                         {money(clientTotals.totalRevenue)}
                       </td>
-                      <td className="py-3 text-right font-mono text-sm sm:text-base text-stone-700">
+                      <td className="py-3 text-right font-mono text-sm sm:text-base text-red-800 pr-2">
                         {money(clientTotals.totalCost)}
                       </td>
-                      <td className="py-3 text-right font-mono text-sm sm:text-base font-bold" style={{ color: '#15803D' }}>
+                      <td className="py-3 text-right font-mono text-sm sm:text-base text-amber-900 pr-2">
+                        {money(clientTotals.totalArtPrice)}
+                      </td>
+                      <td className="py-3 text-right font-mono text-sm sm:text-base font-bold pr-2" style={{ color: '#15803D' }}>
                         {money(clientTotals.totalContribution)}
                       </td>
                       <td className="py-3"></td>
@@ -1458,17 +1825,40 @@ export default function SubscriptionView({
           {/* TOP STAT CARDS (4 cards in one row) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Card 1: ACTIVE CLIENTS */}
-            <div className="p-3.5 rounded border bg-white shadow-xs" style={{ borderColor: C.rule }}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                  ACTIVE CLIENTS
-                </span>
-                <Users size={14} className="text-gray-400" />
+            <div className="p-3.5 rounded border bg-white shadow-xs flex flex-col justify-between" style={{ borderColor: C.rule }}>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    ACTIVE CLIENTS
+                  </span>
+                  <Users size={14} className="text-gray-400" />
+                </div>
+                <div className="text-2xl font-bold mt-1 font-mono text-stone-900">
+                  {performance.totalActiveClients}
+                </div>
+                <span className="text-[10px] text-gray-500 block">Current subscriber accounts</span>
               </div>
-              <div className="text-2xl font-bold mt-1 font-mono text-stone-900">
-                {performance.totalActiveClients}
+              <div className="mt-2.5 pt-2 border-t flex items-center justify-between" style={{ borderColor: C.rule }}>
+                <button
+                  type="button"
+                  onClick={() => setShowActiveClientsModal(true)}
+                  className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+                >
+                  <Eye size={12} />
+                  <span>View Clients ({performance.totalActiveClients})</span>
+                </button>
+                {onNavigateToSubscription && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToSubscription}
+                    className="text-[10px] text-gray-500 hover:text-stone-800 flex items-center gap-0.5"
+                    title="Go to 04 SUBSCRIPTION"
+                  >
+                    <span>04 SUBSCRIPTION</span>
+                    <ArrowRight size={10} />
+                  </button>
+                )}
               </div>
-              <span className="text-[10px] text-gray-500 block">Current subscriber accounts</span>
             </div>
 
             {/* Card 2: MONTHLY REVENUE */}
@@ -1506,17 +1896,31 @@ export default function SubscriptionView({
             </div>
 
             {/* Card 4: COMPANY REQUIREMENT */}
-            <div className="p-3.5 rounded border bg-white shadow-xs" style={{ borderColor: C.rule }}>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                  COMPANY REQUIREMENT
+            <div className="p-3.5 rounded border bg-white shadow-xs flex flex-col justify-between" style={{ borderColor: C.rule }}>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    COMPANY REQUIREMENT
+                  </span>
+                  <ShieldCheck size={14} className="text-gray-400" />
+                </div>
+                <div className="text-2xl font-bold mt-1 font-mono text-stone-900">
+                  {money(performance.totalCompanyMonthlyRequirement)}
+                </div>
+                <span className="text-[10px] text-gray-500 block">Total monthly expenses</span>
+              </div>
+              <div className="mt-2.5 pt-2 border-t flex items-center justify-between" style={{ borderColor: C.rule }}>
+                <a
+                  href="#company-monthly-expenses"
+                  className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+                >
+                  <Edit2 size={11} />
+                  <span>Edit Expenses ↓</span>
+                </a>
+                <span className="text-[10px] text-gray-400 font-mono">
+                  {6 + ((companyExpenses.customItems || []).length)} categories
                 </span>
-                <ShieldCheck size={14} className="text-gray-400" />
               </div>
-              <div className="text-2xl font-bold mt-1 font-mono text-stone-900">
-                {money(performance.totalCompanyMonthlyRequirement)}
-              </div>
-              <span className="text-[10px] text-gray-500 block">Total monthly expenses</span>
             </div>
           </div>
 
@@ -1635,78 +2039,333 @@ export default function SubscriptionView({
 
           {/* BOTTOM COMPACT AREA (2 columns side by side) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-            {/* LEFT: COMPANY MONTHLY EXPENSES */}
-            <div className="lg:col-span-7 p-3.5 rounded border bg-white shadow-xs" style={{ borderColor: C.rule }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-900">
-                  COMPANY MONTHLY EXPENSES (Total: {money(performance.totalCompanyMonthlyRequirement)})
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">Direct overhead</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Salary</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.employeeSalaries)}</span>
+            {/* LEFT: COMPANY MONTHLY EXPENSES (FULLY EDITABLE) */}
+            <div
+              id="company-monthly-expenses"
+              className="lg:col-span-7 p-3.5 rounded border bg-white shadow-xs flex flex-col justify-between"
+              style={{ borderColor: C.rule }}
+            >
+              <div>
+                <div className="flex flex-wrap items-center justify-between mb-2.5 gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-900 block">
+                        COMPANY MONTHLY EXPENSES ({isTechOneTime ? `Recurring: ${money(performance.totalCompanyMonthlyRequirement)}` : `Total: ${money(performance.totalCompanyMonthlyRequirement)}`})
+                      </span>
+                      {isTechOneTime && Number(companyExpenses.technologySoftware) > 0 && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold border border-blue-200 shadow-2xs">
+                          + {money(companyExpenses.technologySoftware)} One-Time Tech Investment
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono">
+                      {isTechOneTime
+                        ? 'Recurring operational overhead sets your monthly break-even target. Technology is tracked as one-time capital.'
+                        : 'Direct overhead — edit any category below to recalculate targets live'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleAddCustomExpense}
+                      className="px-2 py-1 rounded text-[10px] font-semibold border flex items-center gap-1 bg-white hover:bg-stone-50 text-stone-700 transition-colors"
+                      style={{ borderColor: C.rule }}
+                      title="Add custom overhead expense item"
+                    >
+                      <Plus size={12} />
+                      <span>Add Expense</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetCompanyExpenses}
+                      className="px-2 py-1 rounded text-[10px] font-semibold border flex items-center gap-1 bg-white hover:bg-stone-50 text-stone-700 transition-colors"
+                      style={{ borderColor: C.rule }}
+                      title="Reset expenses to default ₹4,60,000"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Reset Defaults</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Rent</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.officeRent)}</span>
+
+                {/* 6 Standard Direct Overhead Categories */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
+                  {/* Salary */}
+                  <div className="p-2 rounded bg-stone-50 border flex flex-col justify-between gap-1" style={{ borderColor: C.rule }}>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 text-[11px] font-semibold">Salary</span>
+                      <span className="text-[9px] text-emerald-700 font-sans font-medium">Recurring Team</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={companyExpenses.employeeSalaries ?? ''}
+                        onChange={(e) => handleUpdateCompanyExpense('employeeSalaries', e.target.value)}
+                        onBlur={() => handleExpenseBlur('employeeSalaries')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: C.rule }}
+                        placeholder="300000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Rent */}
+                  <div className="p-2 rounded bg-stone-50 border flex flex-col justify-between gap-1" style={{ borderColor: C.rule }}>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 text-[11px] font-semibold">Rent</span>
+                      <span className="text-[9px] text-emerald-700 font-sans font-medium">Recurring Office</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={companyExpenses.officeRent ?? ''}
+                        onChange={(e) => handleUpdateCompanyExpense('officeRent', e.target.value)}
+                        onBlur={() => handleExpenseBlur('officeRent')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: C.rule }}
+                        placeholder="50000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Travel */}
+                  <div className="p-2 rounded bg-stone-50 border flex flex-col justify-between gap-1" style={{ borderColor: C.rule }}>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 text-[11px] font-semibold">Travel</span>
+                      <span className="text-[9px] text-emerald-700 font-sans font-medium">Recurring Ops</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={companyExpenses.petrolTravel ?? ''}
+                        onChange={(e) => handleUpdateCompanyExpense('petrolTravel', e.target.value)}
+                        onBlur={() => handleExpenseBlur('petrolTravel')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: C.rule }}
+                        placeholder="15000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Technology (Toggle between One-Time CapEx and Recurring OpEx) */}
+                  <div
+                    className="p-2 rounded border flex flex-col justify-between gap-1 transition-all"
+                    style={{
+                      borderColor: isTechOneTime ? '#93c5fd' : C.rule,
+                      backgroundColor: isTechOneTime ? '#eff6ff' : '#fafaf9',
+                    }}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-gray-900 text-[11px] font-bold">Technology</span>
+                        <span className="text-[9px] text-gray-500 font-sans">Software</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTechnologyOneTime()}
+                        className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-tight uppercase border transition-colors shadow-2xs"
+                        style={{
+                          backgroundColor: isTechOneTime ? '#1e40af' : '#ffffff',
+                          color: isTechOneTime ? '#ffffff' : '#475569',
+                          borderColor: isTechOneTime ? '#1e40af' : '#cbd5e1',
+                        }}
+                        title={isTechOneTime ? 'Switch to Monthly Recurring' : 'Switch to One-Time Investment'}
+                      >
+                        {isTechOneTime ? 'One-Time' : 'Recurring'}
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={companyExpenses.technologySoftware ?? ''}
+                        onChange={(e) => handleUpdateCompanyExpense('technologySoftware', e.target.value)}
+                        onBlur={() => handleExpenseBlur('technologySoftware')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: isTechOneTime ? '#bfdbfe' : C.rule }}
+                        placeholder="500000"
+                      />
+                    </div>
+
+                    <span
+                      className="text-[9px] leading-tight block truncate font-sans"
+                      style={{ color: isTechOneTime ? '#1d4ed8' : '#64748b' }}
+                      title={isTechOneTime ? 'One-time investment (CapEx) — excluded from monthly recurring requirement, recovered via Stage 06 GROWTH.' : 'Recurring OpEx — included in monthly break-even requirement.'}
+                    >
+                      {isTechOneTime ? '★ One-time investment (CapEx)' : 'Monthly recurring overhead'}
+                    </span>
+                  </div>
+
+                  {/* Marketing */}
+                  <div className="p-2 rounded bg-stone-50 border flex flex-col justify-between gap-1" style={{ borderColor: C.rule }}>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 text-[11px] font-semibold">Marketing</span>
+                      <span className="text-[9px] text-emerald-700 font-sans font-medium">Recurring Growth</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={companyExpenses.marketing ?? ''}
+                        onChange={(e) => handleUpdateCompanyExpense('marketing', e.target.value)}
+                        onBlur={() => handleExpenseBlur('marketing')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: C.rule }}
+                        placeholder="35000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Other */}
+                  <div className="p-2 rounded bg-stone-50 border flex flex-col justify-between gap-1" style={{ borderColor: C.rule }}>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 text-[11px] font-semibold">Other</span>
+                      <span className="text-[9px] text-emerald-700 font-sans font-medium">Recurring Misc</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1.5 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentOtherExpenses}
+                        onChange={(e) => handleUpdateOtherExpense(e.target.value)}
+                        onBlur={() => handleExpenseBlur('otherExpenses')}
+                        className="w-full pl-5 pr-1.5 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                        style={{ borderColor: C.rule }}
+                        placeholder="40000"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Travel</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.petrolTravel)}</span>
-                </div>
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Technology</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.technologySoftware)}</span>
-                </div>
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Marketing</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.marketing)}</span>
-                </div>
-                <div className="p-2 rounded bg-stone-50 border flex justify-between items-center" style={{ borderColor: C.rule }}>
-                  <span className="text-gray-600">Other</span>
-                  <span className="font-bold text-stone-900">{money(companyExpenses.otherExpenses + (companyExpenses.otherInvestments || 0))}</span>
-                </div>
+
+                {/* Custom Overhead Expenses (if any) */}
+                {Array.isArray(companyExpenses.customItems) && companyExpenses.customItems.length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t space-y-2" style={{ borderColor: C.rule }}>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 block">
+                      Custom Overhead Items ({companyExpenses.customItems.length})
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {companyExpenses.customItems.map((item) => (
+                        <div key={item.id} className="p-1.5 rounded bg-stone-50 border flex items-center gap-1.5" style={{ borderColor: C.rule }}>
+                          <input
+                            type="text"
+                            value={item.name}
+                            onChange={(e) => handleUpdateCustomExpense(item.id, 'name', e.target.value)}
+                            className="flex-1 px-2 py-1 rounded text-xs bg-white border outline-none text-stone-900 font-medium"
+                            style={{ borderColor: C.rule }}
+                            placeholder="Expense name"
+                          />
+                          <div className="relative w-24">
+                            <span className="absolute left-1.5 top-1 text-xs text-gray-400 pointer-events-none">{symbol}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.amount ?? ''}
+                              onChange={(e) => handleUpdateCustomExpense(item.id, 'amount', e.target.value)}
+                              onBlur={() => handleCustomExpenseBlur(item.id)}
+                              className="w-full pl-4 pr-1 py-1 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none"
+                              style={{ borderColor: C.rule }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCustomExpense(item.id)}
+                            className="p-1 rounded hover:bg-red-50 text-stone-400 hover:text-red-600 transition-colors"
+                            title="Remove custom expense"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* RIGHT: ADDITIONAL PLAN SELECTOR */}
+            {/* RIGHT: ADDITIONAL PLAN SELECTOR (SCENARIO MODELING) */}
             <div className="lg:col-span-5 p-3.5 rounded border bg-white shadow-xs flex flex-col justify-between" style={{ borderColor: C.rule }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-900">
-                  ADDITIONAL PLAN SELECTOR
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">Scenario Modeling</span>
-              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-900">
+                    ADDITIONAL PLAN SELECTOR
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-mono">Scenario Modeling</span>
+                </div>
 
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <select
-                    value={additionalPlanType}
-                    onChange={(e) => setAdditionalPlanType(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded text-xs bg-stone-50 border outline-none font-bold cursor-pointer appearance-none pr-8"
-                    style={{ borderColor: C.rule, color: C.ink }}
-                  >
-                    {PLAN_TABS.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label} Plan
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="absolute right-2.5 top-2.5 text-gray-500 pointer-events-none" />
+                <div className="flex items-center gap-2 mb-2.5">
+                  <div className="relative flex-1">
+                    <select
+                      value={additionalPlanType}
+                      onChange={(e) => {
+                        setAdditionalPlanType(e.target.value);
+                      }}
+                      className="w-full px-3 py-1.5 rounded text-xs bg-stone-50 border outline-none font-bold cursor-pointer appearance-none pr-8"
+                      style={{ borderColor: C.rule, color: C.ink }}
+                    >
+                      {PLAN_TABS.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label} Plan
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-2.5 top-2.5 text-gray-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                {/* Editable Contribution per Plan with Plan Default Reset */}
+                <div className="p-2.5 rounded bg-stone-50 border mb-2" style={{ borderColor: C.rule }}>
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-gray-600 font-medium">
+                      Contribution per {PLAN_TABS.find((t) => t.id === additionalPlanType)?.label}:
+                    </span>
+                    {customPlanContribOverride !== '' && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomPlanContribOverride('')}
+                        className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5"
+                        title="Revert to configured plan contribution"
+                      >
+                        <RotateCcw size={10} />
+                        <span>Reset ({money(selectedPlanContrib)})</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1.5 text-xs font-mono font-medium text-gray-400 pointer-events-none">{symbol}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={customPlanContribOverride !== '' ? customPlanContribOverride : selectedPlanContrib}
+                      onChange={(e) => setCustomPlanContribOverride(e.target.value)}
+                      className="w-full pl-6 pr-3 py-1.5 rounded text-xs font-mono font-bold bg-white border text-stone-900 outline-none focus:border-stone-500 transition-colors"
+                      style={{ borderColor: C.rule }}
+                      placeholder={String(selectedPlanContrib)}
+                    />
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-1 block">
+                    {customPlanContribOverride !== '' ? '⚡ Custom scenario contribution active' : 'Computed from 04 SUBSCRIPTION plan cost model'}
+                  </span>
                 </div>
               </div>
 
               <div className="mt-2.5 pt-2 border-t flex items-center justify-between text-xs font-mono" style={{ borderColor: C.rule }}>
-                <span className="text-gray-600">
-                  Contribution per {PLAN_TABS.find((t) => t.id === additionalPlanType)?.label}:
-                </span>
-                <strong className="text-stone-900">{money(selectedPlanContrib)}</strong>
-              </div>
-              <div className="flex items-center justify-between text-xs font-mono mt-1">
-                <span className="text-gray-600">Plans needed:</span>
-                <strong className="text-stone-900 text-sm font-bold">{performance.additionalPlansNeeded}</strong>
+                <span className="text-gray-600">Plans needed to breakeven:</span>
+                <strong className="text-stone-900 text-sm sm:text-base font-bold">
+                  {performance.additionalPlansNeeded}{' '}
+                  <span className="text-xs font-normal text-gray-500">
+                    {PLAN_TABS.find((t) => t.id === additionalPlanType)?.label || 'Plan'}s
+                  </span>
+                </strong>
               </div>
             </div>
           </div>
@@ -1775,29 +2434,44 @@ export default function SubscriptionView({
 
               {/* Financial Metrics */}
               <div className="p-4 rounded border bg-white" style={{ borderColor: C.rule }}>
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2 text-gray-500">
-                  Client Economics
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    Client Economics Breakdown
+                  </div>
+                  <div className="text-[11px] font-mono text-gray-500">
+                    Client Pay − Delivery Cost − Art Price = Net Contribution
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
                   <div>
-                    <span className="text-[10px] text-gray-500 block">Monthly Fee</span>
-                    <span className="text-base font-bold">{money(viewingClient.monthlyFee)}</span>
+                    <span className="text-[10px] text-gray-500 block uppercase font-semibold">1. Client Pay</span>
+                    <span className="text-base font-bold text-stone-900">{money(viewingClient.monthlyFee)}</span>
+                    <span className="text-[10px] text-gray-400 block font-sans">12 mo: {money((viewingClient.monthlyFee || 0) * 12)}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 block">Total Spend (12 mo)</span>
-                    <span className="text-base font-bold text-stone-800">
-                      {money(viewingClient.totalSpend ?? ((viewingClient.monthlyCost || 0) * 12))}
+                    <span className="text-[10px] text-red-700 block uppercase font-semibold">2. Delivery Cost</span>
+                    <span className="text-base font-bold text-red-800">
+                      {money(viewingClient.avgMonthlySpend ?? viewingClient.monthlyCost)}/mo
+                    </span>
+                    <span className="text-[10px] text-gray-400 block font-sans">
+                      12 mo: {money(viewingClient.totalSpend ?? ((viewingClient.monthlyCost || 0) * 12))}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 block">Avg. Monthly Spend</span>
-                    <span className="text-base font-bold text-stone-700">
-                      {money(viewingClient.avgMonthlySpend ?? viewingClient.monthlyCost)}
+                    <span className="text-[10px] text-amber-700 block uppercase font-semibold">3. Art Price</span>
+                    <span className="text-base font-bold text-amber-900">
+                      {money(viewingClient.totalArtworkInvestment || viewingCurated.totalArtworkInvestment || 0)}
+                    </span>
+                    <span className="text-[10px] text-gray-400 block font-sans">
+                      Amortized: {money(Math.round((viewingClient.totalArtworkInvestment || viewingCurated.totalArtworkInvestment || 0) / 12))}/mo
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 block">Monthly Contribution</span>
-                    <span className="text-base font-bold text-emerald-700">{money(viewingClient.monthlyContribution)}</span>
+                    <span className="text-[10px] text-emerald-700 block uppercase font-semibold">Net Contribution</span>
+                    <span className="text-base font-bold text-emerald-700">{money(viewingClient.monthlyContribution)}/mo</span>
+                    <span className="text-[10px] text-gray-400 block font-sans">
+                      12 mo: {money(viewingClient.totalNetContribution ?? ((viewingClient.monthlyContribution || 0) * 12))}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1847,6 +2521,171 @@ export default function SubscriptionView({
         </div>
         );
       })()}
+
+      {/* ===================================================================
+       * ACTIVE SUBSCRIPTION CLIENTS MODAL (FROM SCREEN 2)
+       * ===================================================================*/}
+      {showActiveClientsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div
+            className="w-full max-w-4xl rounded-lg shadow-xl overflow-hidden animate-fadeIn flex flex-col max-h-[85vh]"
+            style={{ backgroundColor: C.paper, border: `1px solid ${C.rule}` }}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: C.rule }}>
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded" style={{ backgroundColor: C.paperDark, color: C.inkMuted }}>
+                  PORTFOLIO SUBSCRIBERS
+                </span>
+                <h3 className="text-xl font-bold mt-1" style={{ fontFamily: FONT_DISPLAY, color: C.ink }}>
+                  Active Clients &amp; Revenue Sources
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Accounts generating {money(performance.totalMonthlySubscriptionRevenue)} in billings and {money(performance.totalMonthlyContribution)} net contribution.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowActiveClientsModal(false)}
+                className="p-1.5 rounded hover:bg-black/10 transition-colors text-gray-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {/* Stat Summary Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded bg-white border" style={{ borderColor: C.rule }}>
+                  <span className="text-[10px] text-gray-500 uppercase font-semibold block">Total Subscribers</span>
+                  <span className="text-lg font-bold font-mono text-stone-900 mt-0.5 block">{activeClients.length}</span>
+                </div>
+                <div className="p-3 rounded bg-white border" style={{ borderColor: C.rule }}>
+                  <span className="text-[10px] text-gray-500 uppercase font-semibold block">Monthly Billings</span>
+                  <span className="text-lg font-bold font-mono text-stone-900 mt-0.5 block">{money(performance.totalMonthlySubscriptionRevenue)}</span>
+                </div>
+                <div className="p-3 rounded bg-white border" style={{ borderColor: C.rule }}>
+                  <span className="text-[10px] text-emerald-800 uppercase font-semibold block">Net Contribution</span>
+                  <span className="text-lg font-bold font-mono text-emerald-700 mt-0.5 block">{money(performance.totalMonthlyContribution)}</span>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto rounded border bg-white" style={{ borderColor: C.rule }}>
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b text-[10px] uppercase tracking-wider bg-stone-50" style={{ borderColor: C.rule, color: C.inkMuted }}>
+                      <th className="py-2.5 px-3 font-semibold">Client</th>
+                      <th className="py-2.5 px-3 font-semibold">Plan</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Fee / Mo</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Spend / Mo</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">Contribution</th>
+                      <th className="py-2.5 px-3 font-semibold text-center w-28">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: C.rule }}>
+                    {activeClients.map((client) => {
+                      const fee = Number(client.monthlyFee) || 0;
+                      let spend = client.avgMonthlySpend;
+                      if (spend === undefined || spend === null) {
+                        spend = client.costs && client.costs.length > 0
+                          ? Math.round(calculateClientEconomics({ costs: client.costs, monthlyFee: fee, periodMonths: 12 }).avgMonthlySpend)
+                          : (Number(client.monthlyCost) || 0);
+                      }
+                      const contrib = client.monthlyContribution !== undefined && client.monthlyContribution !== null
+                        ? Number(client.monthlyContribution)
+                        : (fee - spend);
+
+                      return (
+                        <tr key={client.id} className="hover:bg-black/5 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-stone-900">{client.clientName}</td>
+                          <td className="py-2.5 px-3 font-medium text-stone-700">{client.planName}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold">{money(fee)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono text-gray-600">{money(spend)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold" style={{ color: contrib >= 0 ? '#15803D' : '#DC2626' }}>
+                            {money(contrib)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowActiveClientsModal(false);
+                                  setViewingClient(client);
+                                }}
+                                className="p-1 rounded hover:bg-stone-100 text-stone-600 transition-colors"
+                                title="View details"
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowActiveClientsModal(false);
+                                  handleEditActiveClient(client);
+                                  if (onNavigateToSubscription) onNavigateToSubscription();
+                                }}
+                                className="p-1 rounded hover:bg-blue-50 text-blue-600 transition-colors"
+                                title="Edit in 04 SUBSCRIPTION"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteActiveClient(client.id)}
+                                className="p-1 rounded hover:bg-red-50 text-red-600 transition-colors"
+                                title="Unassign subscription"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {activeClients.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-xs text-gray-500">
+                          No active subscriptions assigned yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t flex items-center justify-between" style={{ borderColor: C.rule, backgroundColor: C.paperDark }}>
+              <div>
+                {onNavigateToSubscription && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowActiveClientsModal(false);
+                      onNavigateToSubscription();
+                    }}
+                    className="px-3 py-1.5 rounded text-xs font-semibold border bg-stone-900 text-white flex items-center gap-1.5 hover:bg-stone-800 transition-colors"
+                  >
+                    <span>Manage Full Portfolio (04 SUBSCRIPTION)</span>
+                    <ArrowRight size={13} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowActiveClientsModal(false)}
+                className="px-4 py-1.5 rounded text-xs font-medium border bg-white text-stone-800 hover:bg-stone-50 transition-colors"
+                style={{ borderColor: C.rule }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
